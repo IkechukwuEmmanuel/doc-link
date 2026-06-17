@@ -17,11 +17,15 @@ ambiguities are resolved toward the simplest, most boring, production-safe optio
 run via `docker-compose.yml`. MinIO is defined from the start though only used from
 Phase 3, so infra stays stable across phases.
 
-**Virus scanning (ClamAV).** ⚠️ BLOCKER (deferred to Phase 3): The PRD requires all
-uploads to be malware-scanned before being retrievable. The scanning interface will
-be defined and wired in Phase 3; if a real ClamAV container is not running, the scan
-service is stubbed to mark uploads `pending`→`failed` (NOT `clean`), so nothing is
-served unscanned. This stub MUST be replaced with a real scanner before launch.
+**Virus scanning (ClamAV).** ⚠️ BLOCKER (interface implemented in Phase 3; real
+scanner still required before launch): The PRD requires all uploads to be
+malware-scanned before being retrievable. As of Phase 3 the scan interface
+(`app/services/scan.py`) is implemented and **fails closed** — when ClamAV is
+disabled or unreachable, uploads are marked `failed` (never `clean`), their bytes are
+deleted from storage, and downloads return 409. A real ClamAV daemon is used when
+`CLAMAV_ENABLED=true` and reachable (`docker compose --profile scan up -d clamav`).
+The remaining launch task is to run ClamAV in production and flip `CLAMAV_ENABLED`;
+the fail-closed default guarantees nothing unscanned is ever served in the meantime.
 
 ## Backend
 
@@ -65,3 +69,23 @@ regenerate (bounded retries) before widening the number range.
 - **REST `PUT` retained** as the documented save fallback; the live path is now the
   WebSocket. The frontend no longer calls `PUT` on keystroke but `savePad()` remains
   in the API client.
+
+### Phase 3 — File uploads
+- **Uploads are proxied through FastAPI**, not direct-to-MinIO presigned PUTs. The
+  scan-before-serve requirement needs a server step regardless, so proxying keeps cap
+  enforcement and scanning in one place. `aioboto3` talks to MinIO/S3
+  (`app/services/storage.py`).
+- **`files` table** (`app/models/file.py`): `pad_id` FK (CASCADE), filename,
+  content_type, size, unique `storage_key` (`{pad_id}/{uuid}`), and a `scan_status`
+  enum (`pending`/`clean`/`failed`). New Alembic migration `dcd7e589eb1b`. (Note: the
+  models for the pre-existing `pads.is_archived`/`pads.name`/`users.display_name`
+  columns are not yet defined, so autogenerate proposed dropping them — those drops
+  were removed from the migration by hand. Reconciling those columns with their models
+  is follow-up work for the phase that uses them.)
+- **Caps**: anonymous-tier limits from `Settings` are applied to every pad for now
+  (per-file, per-pad count, per-pad total). Authenticated-tier caps land with Phase 4.
+- **Scanning fails closed** (see the ClamAV blocker entry above). On a non-clean
+  verdict the stored object is deleted immediately; the row is kept as `failed` so the
+  UI can show why the file is unavailable.
+- **Downloads stream through the backend** (clean-only) rather than via presigned GET,
+  so the clean-status gate is enforced on every fetch, not just at URL-issue time.

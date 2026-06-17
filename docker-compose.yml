@@ -43,6 +43,26 @@ services:
       timeout: 5s
       retries: 5
 
+  # ClamAV malware scanner — Phase 3. Optional/heavy (~1GB virus DB), so it's
+  # behind the "scan" profile and off by default. Without it, the scan service
+  # fails closed (uploads marked failed, never served). Enable with:
+  #   docker compose --profile scan up -d clamav
+  # and set CLAMAV_ENABLED=true in the backend .env.
+  clamav:
+    image: clamav/clamav:latest
+    profiles: ["scan"]
+    ports:
+      - "3310:3310"
+    volumes:
+      - clamavdb:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
 volumes:
   pgdata:
   miniodata:
+  clamavdb:

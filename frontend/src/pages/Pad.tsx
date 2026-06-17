@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 
 import TopBar from "../components/TopBar";
 import CollabEditor from "../components/CollabEditor";
+import FileTray from "../components/FileTray";
 import { ConnectionState } from "../components/ConnectionIndicator";
 import { PresencePeer } from "../components/PresenceStack";
 import { createPad, getPad } from "../api";
@@ -108,6 +109,7 @@ export default function Pad() {
             onPeersChange={setPeers}
             onConnectionChange={setConnection}
           />
+          <FileTray slug={slug} />
         </div>
       </div>
     </div>

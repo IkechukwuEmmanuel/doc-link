@@ -39,7 +39,19 @@ Selections render at ~18% opacity of the peer's solid color. (Live wiring: Phase
 
 ## Components built once, reused (spec §6)
 `CopyButton`, `TopBar`, `PresenceStack`, `ConnectionIndicator`, `ThemeToggle` live in
-`src/components/`. The file/image chip is specified but lands with Phase 3.
+`src/components/`.
+
+## File chip + upload (Phase 3)
+- `FileTray` (`src/components/FileTray.tsx`) sits below the editor: a click/drag-drop
+  dropzone plus a row of file chips. No modal — uploads are inline and ambient, per the
+  anti-pattern rules.
+- **Chips encode scan state** rather than hiding unscanned files: `clean` chips are a
+  monospace download link with size; `pending` shows "scanning…" (warning color);
+  `failed` shows the name struck-through with "unavailable" (danger color) and a tooltip
+  explaining it failed the malware scan. This keeps the security state visible instead of
+  silently dropping files.
+- Styling uses existing tokens (pill radius, surface/border, mono for filenames) so the
+  tray reads as part of the same system.
 
 ## Editor surface (Phase 2)
 - The Phase 1 `<textarea>` is replaced by **CodeMirror 6** (`src/components/CollabEditor.tsx`)

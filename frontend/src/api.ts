@@ -51,3 +51,48 @@ export async function savePad(slug: string, content: string): Promise<void> {
   });
   if (!resp.ok) throw new Error("Failed to save.");
 }
+
+export type ScanStatus = "pending" | "clean" | "failed";
+
+export interface PadFile {
+  id: string;
+  pad_id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  scan_status: ScanStatus;
+  created_at: string;
+}
+
+export function fileUrl(slug: string, id: string): string {
+  return `/api/pads/${encodeURIComponent(slug)}/files/${id}`;
+}
+
+export async function listFiles(slug: string): Promise<PadFile[]> {
+  const resp = await fetch(`/api/pads/${encodeURIComponent(slug)}/files`);
+  if (!resp.ok) throw new Error("Failed to load files.");
+  return resp.json();
+}
+
+export async function uploadFile(slug: string, file: File): Promise<PadFile> {
+  const form = new FormData();
+  form.append("file", file);
+  const resp = await fetch(`/api/pads/${encodeURIComponent(slug)}/files`, {
+    method: "POST",
+    body: form,
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(
+      typeof err.detail === "string" ? err.detail : "Upload failed."
+    );
+  }
+  return resp.json();
+}
+
+export async function deleteFile(slug: string, id: string): Promise<void> {
+  const resp = await fetch(`/api/pads/${encodeURIComponent(slug)}/files/${id}`, {
+    method: "DELETE",
+  });
+  if (!resp.ok && resp.status !== 204) throw new Error("Failed to delete file.");
+}

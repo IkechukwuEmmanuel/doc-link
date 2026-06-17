@@ -12,7 +12,7 @@ the rationale behind implementation choices.
 |-------|-------------|-------|
 | 1 | Core pad CRUD + slugs (no real-time, no auth) | ✅ Done |
 | 2 | Real-time collaboration (Yjs/CRDT) | ✅ Done |
-| 3 | File uploads | ⬜ |
+| 3 | File uploads | ✅ Done |
 | 4 | Authentication | ⬜ |
 | 5 | Authenticated features (incl. dashboard) | ⬜ |
 | 6 | Rate limiting & abuse prevention | ⬜ |
@@ -24,7 +24,8 @@ the rationale behind implementation choices.
 - **Frontend**: React + TypeScript + Vite, CodeMirror 6
 - **Real-time**: Yjs CRDT over a y-websocket-compatible server (`pycrdt` /
   `pycrdt-websocket`) hosted in-process by FastAPI
-- **Infra**: Docker Compose (Postgres, Redis, MinIO)
+- **Storage**: S3-compatible object storage (MinIO locally) via `aioboto3`
+- **Infra**: Docker Compose (Postgres, Redis, MinIO; optional ClamAV)
 
 ## How real-time works (Phase 2)
 
@@ -39,6 +40,23 @@ the rationale behind implementation choices.
   the connection indicator reflects the live WebSocket status.
 - Single-process, in-memory rooms are sufficient for now. Multi-node fan-out (Redis
   pub/sub or a shared Y store) is deferred to Phase 6.
+
+## File uploads (Phase 3)
+
+- Files are **proxied through the backend**: the browser POSTs to
+  `POST /api/pads/{slug}/files`, which enforces per-pad quotas (count / per-file /
+  total bytes), stores the bytes in MinIO, scans them, and persists the result.
+- **Malware scanning fails closed.** A file is only ever served once its
+  `scan_status` is `clean`. If the scanner is disabled or unreachable, the upload is
+  marked `failed`, its bytes are deleted from storage, and downloads return 409.
+  ClamAV is wired but optional — enable it with the compose `scan` profile and
+  `CLAMAV_ENABLED=true`:
+
+  ```bash
+  docker compose --profile scan up -d clamav
+  ```
+
+- Downloads stream through `GET /api/pads/{slug}/files/{id}` (clean-only).
 
 ## Local development
 
@@ -84,4 +102,8 @@ Open the same pad URL in two browser windows to see live collaboration.
 | PUT | `/api/pads/{slug}` | Update content (REST fallback; live path is the WebSocket) |
 | GET | `/api/pads/{slug}/raw` | Raw text export (curl-friendly) |
 | WS | `/api/pads/{slug}/ws` | Real-time CRDT sync (Yjs / y-websocket protocol) |
+| POST | `/api/pads/{slug}/files` | Upload a file (multipart; cap-enforced, scanned) |
+| GET | `/api/pads/{slug}/files` | List a pad's files + scan status |
+| GET | `/api/pads/{slug}/files/{id}` | Download a file (only if `clean`) |
+| DELETE | `/api/pads/{slug}/files/{id}` | Remove a file |
 | GET | `/health` | Health check |

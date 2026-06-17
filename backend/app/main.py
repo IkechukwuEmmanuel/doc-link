@@ -3,15 +3,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import pads, ws
+from app.api import files, pads, ws
 from app.api.ws import server as crdt_server
 from app.core.config import get_settings
+from app.services import storage
 
 settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await storage.ensure_bucket()
     async with crdt_server:
         yield
 
@@ -28,6 +30,7 @@ app.add_middleware(
 
 app.include_router(pads.router)
 app.include_router(ws.router)
+app.include_router(files.router)
 
 
 @app.get("/health")
