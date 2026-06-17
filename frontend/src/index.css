@@ -1,0 +1,367 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource/jetbrains-mono";
+@import "./styles/tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-text-primary);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
+
+/* ---------- shared primitives ---------- */
+
+.btn {
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out);
+}
+.btn-primary {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+.btn-primary:hover {
+  background: var(--color-accent-strong);
+}
+.btn-secondary {
+  background: transparent;
+  border-color: var(--color-border-subtle);
+  color: var(--color-text-primary);
+}
+.btn-secondary:hover {
+  border-color: var(--color-text-muted);
+}
+
+.text-link {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.text-link:hover {
+  text-decoration: underline;
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ---------- homepage ---------- */
+
+.landing {
+  position: relative;
+  min-height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.landing-center {
+  width: min(720px, 90vw);
+  margin-top: 40vh;
+  transform: translateY(-50%);
+  text-align: center;
+}
+.landing-corner {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+}
+.landing-login {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+.landing-login:hover {
+  color: var(--color-text-primary);
+}
+
+.hero-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  text-align: center;
+  font-family: var(--font-sans);
+  font-size: var(--text-hero);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-text-primary);
+  caret-color: var(--color-accent);
+}
+.hero-input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.5;
+}
+.hero-example {
+  margin-top: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+.hero-slug {
+  color: var(--color-accent);
+}
+
+/* ---------- pad editor ---------- */
+
+.pad {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--topbar-height);
+  flex: 0 0 var(--topbar-height);
+  padding: 0 var(--space-2);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.topbar-left,
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.brand-mark {
+  color: var(--color-accent);
+  font-size: var(--text-lg);
+  text-decoration: none;
+  line-height: 1;
+}
+
+/* copy button (slug) */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  transition: background var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out);
+}
+.copy-btn:hover {
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+}
+.copy-btn .copy-icon {
+  display: inline-flex;
+  color: var(--color-text-muted);
+}
+.copy-btn.is-copied {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+}
+.copy-btn.is-copied .copy-icon {
+  color: var(--color-success);
+}
+
+/* presence */
+.presence-stack {
+  display: flex;
+  align-items: center;
+}
+.presence-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  border: 2px solid var(--color-surface);
+  margin-left: -6px;
+}
+.presence-avatar:first-child {
+  margin-left: 0;
+}
+.presence-overflow {
+  background: var(--color-text-muted);
+}
+
+/* connection indicator — reserves a fixed slot, no layout shift */
+.conn-indicator {
+  min-width: 92px;
+  text-align: right;
+  font-size: var(--text-xs);
+}
+.conn-reconnecting {
+  color: var(--color-text-muted);
+  animation: conn-pulse 1.4s var(--ease-in-out) infinite;
+}
+.conn-reconnected {
+  color: var(--color-success);
+  animation: conn-fade var(--dur-state) var(--ease-out);
+}
+@keyframes conn-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+@keyframes conn-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* dismissible sign-in hint */
+.signin-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.signin-hint a {
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+.signin-hint a:hover {
+  color: var(--color-accent);
+}
+.hint-dismiss {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out);
+}
+.theme-toggle:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-muted);
+}
+
+/* canvas */
+.pad-canvas-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+.pad-canvas {
+  max-width: var(--canvas-max-width);
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-3) var(--space-8);
+  min-height: 100%;
+}
+.editor {
+  display: block;
+  width: 100%;
+  min-height: 60vh;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: var(--leading-read);
+  caret-color: var(--color-accent);
+}
+.editor::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.55;
+}
+
+.save-indicator {
+  position: absolute;
+  bottom: var(--space-2);
+  right: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+/* state screens */
+.pad-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  text-align: center;
+  padding: 0 var(--space-3);
+  color: var(--color-text-primary);
+}
+.pad-state-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 768px) {
+  .hero-input {
+    font-size: var(--text-xl);
+  }
+  .signin-hint a {
+    display: none; /* keep slug/copy + connection priority on mobile */
+  }
+  .copy-btn,
+  .hint-dismiss,
+  .theme-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
