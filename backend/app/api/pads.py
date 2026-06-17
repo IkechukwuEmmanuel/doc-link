@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.db.session import get_db
+from app.models.user import User
 from app.schemas.pad import PadCreate, PadOut, PadUpdate
 from app.services import pad as pad_service
 from app.services import slug as slug_service
@@ -47,6 +49,25 @@ async def update_pad(slug: str, body: PadUpdate, db: AsyncSession = Depends(get_
     if pad is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pad not found.")
     pad = await pad_service.update_pad_content(db, pad, body.content)
+    return pad
+
+
+@router.post("/{slug}/claim", response_model=PadOut)
+async def claim_pad(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Claim ownership of an anonymous, unowned pad (requires auth)."""
+    pad = await pad_service.get_pad_by_slug(db, slug)
+    if pad is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pad not found.")
+    try:
+        pad = await pad_service.claim_pad(db, pad, user.id)
+    except pad_service.PadAlreadyOwnedError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="This pad already has an owner."
+        )
     return pad
 
 

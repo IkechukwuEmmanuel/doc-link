@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import files, pads, ws
+from app.api import auth, files, pads, ws
 from app.api.ws import server as crdt_server
 from app.core.config import get_settings
 from app.services import storage
@@ -28,6 +28,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(pads.router)
 app.include_router(ws.router)
 app.include_router(files.router)

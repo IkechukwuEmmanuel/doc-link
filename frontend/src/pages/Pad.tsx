@@ -7,6 +7,7 @@ import FileTray from "../components/FileTray";
 import { ConnectionState } from "../components/ConnectionIndicator";
 import { PresencePeer } from "../components/PresenceStack";
 import { createPad, getPad } from "../api";
+import { useAuth } from "../auth";
 import { useTheme } from "../useTheme";
 
 type Status = "loading" | "missing" | "invalid" | "ready" | "error";
@@ -16,11 +17,13 @@ export default function Pad() {
   const location = useLocation();
   const seed = (location.state as { seed?: string } | null)?.seed ?? "";
   const { theme, toggle } = useTheme();
+  const { user, authedFetch } = useAuth();
 
   const [status, setStatus] = useState<Status>("loading");
   const [errorMsg, setErrorMsg] = useState("");
   const [peers, setPeers] = useState<PresencePeer[]>([]);
   const [connection, setConnection] = useState<ConnectionState>("connected");
+  const [ownerId, setOwnerId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -29,6 +32,7 @@ export default function Pad() {
       .then((res) => {
         if (cancelled) return;
         if (res.kind === "found") {
+          setOwnerId(res.pad.owner_id);
           setStatus("ready");
         } else {
           setStatus(res.creatable ? "missing" : "invalid");
@@ -44,6 +48,16 @@ export default function Pad() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
+
+  async function claim() {
+    const resp = await authedFetch(`/api/pads/${encodeURIComponent(slug)}/claim`, {
+      method: "POST",
+    });
+    if (resp.ok) {
+      const pad = await resp.json();
+      setOwnerId(pad.owner_id);
+    }
+  }
 
   async function createHere() {
     try {
@@ -100,6 +114,8 @@ export default function Pad() {
         connection={connection}
         theme={theme}
         onToggleTheme={toggle}
+        canClaim={!!user && ownerId === null}
+        onClaim={claim}
       />
       <div className="pad-canvas-scroll">
         <div className="pad-canvas">

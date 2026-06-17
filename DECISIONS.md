@@ -89,3 +89,28 @@ regenerate (bounded retries) before widening the number range.
   UI can show why the file is unavailable.
 - **Downloads stream through the backend** (clean-only) rather than via presigned GET,
   so the clean-status gate is enforced on every fetch, not just at URL-issue time.
+
+### Phase 4 — Authentication
+- **Token delivery**: refresh token in a `Secure`/`httpOnly`/`SameSite=Lax` cookie
+  scoped to `/api/auth`; access token (15 min) returned in the JSON body and kept in
+  memory by the SPA. This is the XSS-resistant default — the long-lived credential is
+  never readable by JS, and the short-lived one dies with the tab. `cookies_secure` is
+  off in `development` so it works over http locally.
+- **Password hashing**: argon2 (`argon2-cffi`), not bcrypt — modern default, no length
+  cap surprises. JWTs are HS256 via `pyjwt` with a typed `type` claim so an access
+  token can't be replayed as a refresh token (enforced + tested).
+- **Refresh rotation**: every `/refresh` issues a fresh refresh cookie. A server-side
+  token denylist/rotation-family is deferred (no token storage yet); acceptable for now
+  given short access TTL and httpOnly refresh.
+- **Google OAuth**: standard auth-code flow; `upsert_google_user` links by email and
+  marks `email_verified`. The redirect_uri points at the frontend origin so the Vite
+  proxy forwards `/api/auth/google/callback` to the backend in dev. Live round-trip
+  needs real client credentials and is unverified here (unit-tested with a mocked
+  exchange).
+- **Claiming**: `POST /api/pads/{slug}/claim` (auth required) sets `owner_id` and
+  `is_anonymous=false` only if the pad is currently unowned (409 otherwise). This is the
+  first real use of the long-dormant `owner_id` column. Visibility enforcement stays in
+  Phase 5.
+- **Model drift partially closed**: added `User.display_name` (column existed since
+  migration `610b7d4ad610`). `pads.is_archived`/`pads.name` remain model-less until the
+  phase that uses them (Phase 5).

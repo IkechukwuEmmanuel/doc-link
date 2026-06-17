@@ -13,7 +13,7 @@ the rationale behind implementation choices.
 | 1 | Core pad CRUD + slugs (no real-time, no auth) | ✅ Done |
 | 2 | Real-time collaboration (Yjs/CRDT) | ✅ Done |
 | 3 | File uploads | ✅ Done |
-| 4 | Authentication | ⬜ |
+| 4 | Authentication | ✅ Done |
 | 5 | Authenticated features (incl. dashboard) | ⬜ |
 | 6 | Rate limiting & abuse prevention | ⬜ |
 | 7 | Polish & hardening | ⬜ |
@@ -57,6 +57,17 @@ the rationale behind implementation choices.
   ```
 
 - Downloads stream through `GET /api/pads/{slug}/files/{id}` (clean-only).
+
+## Authentication (Phase 4)
+
+- Email/password (argon2 hashing) **and** Google OAuth.
+- **Tokens**: the refresh token is stored in a `Secure`, `httpOnly`, `SameSite=Lax`
+  cookie scoped to `/api/auth`; the short-lived (15 min) access token is returned in
+  the JSON body and held only in memory by the SPA. The client bootstraps its session
+  on load via `POST /api/auth/refresh` and transparently refreshes once on a 401.
+- A logged-in user can **claim** an anonymous pad they're viewing
+  (`POST /api/pads/{slug}/claim`), which sets `owner_id` and clears `is_anonymous`.
+- Visibility enforcement and pad management (dashboard) are Phase 5.
 
 ## Local development
 
@@ -106,4 +117,12 @@ Open the same pad URL in two browser windows to see live collaboration.
 | GET | `/api/pads/{slug}/files` | List a pad's files + scan status |
 | GET | `/api/pads/{slug}/files/{id}` | Download a file (only if `clean`) |
 | DELETE | `/api/pads/{slug}/files/{id}` | Remove a file |
+| POST | `/api/auth/signup` | Register (email/password); sets refresh cookie |
+| POST | `/api/auth/login` | Log in; returns access token + sets refresh cookie |
+| POST | `/api/auth/refresh` | Rotate refresh cookie, issue new access token |
+| POST | `/api/auth/logout` | Clear the refresh cookie |
+| GET | `/api/auth/me` | Current user (Bearer access token) |
+| GET | `/api/auth/google/login` | Start Google OAuth |
+| GET | `/api/auth/google/callback` | Google OAuth callback |
+| POST | `/api/pads/{slug}/claim` | Claim an anonymous pad (auth required) |
 | GET | `/health` | Health check |

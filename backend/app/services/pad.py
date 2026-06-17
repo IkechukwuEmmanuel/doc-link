@@ -71,3 +71,17 @@ async def update_pad_content(db: AsyncSession, pad: Pad, content: str) -> Pad:
     await db.commit()
     await db.refresh(pad)
     return pad
+
+
+class PadAlreadyOwnedError(Exception):
+    """Raised when claiming a pad that already has an owner."""
+
+
+async def claim_pad(db: AsyncSession, pad: Pad, owner_id) -> Pad:
+    if pad.owner_id is not None:
+        raise PadAlreadyOwnedError(pad.slug)
+    pad.owner_id = owner_id
+    pad.is_anonymous = False
+    await db.commit()
+    await db.refresh(pad)
+    return pad

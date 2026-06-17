@@ -53,6 +53,18 @@ Selections render at ~18% opacity of the peer's solid color. (Live wiring: Phase
 - Styling uses existing tokens (pill radius, surface/border, mono for filenames) so the
   tray reads as part of the same system.
 
+## Auth screens + signed-in TopBar (Phase 4)
+- `/login` and `/signup` share one `AuthPage` component (a single card, no modal) with
+  email/password fields and a "Continue with Google" button. Minimal and token-styled,
+  consistent with the no-onboarding/no-mascot rules.
+- The TopBar now reflects session state: when signed out it keeps the dismissible
+  "Sign in to keep this pad forever" hint; when signed in it shows the display name (or
+  email) + a "Log out" action and hides the hint.
+- **Claim affordance**: a logged-in user viewing an unowned pad sees a "Claim this pad"
+  pill in the TopBar. It disappears once the pad has an owner. This surfaces the new
+  ownership capability inline rather than via a separate management screen (that's
+  Phase 5).
+
 ## Editor surface (Phase 2)
 - The Phase 1 `<textarea>` is replaced by **CodeMirror 6** (`src/components/CollabEditor.tsx`)
   bound to a Yjs doc via `y-codemirror.next` + `y-websocket`. CodeMirror was chosen over

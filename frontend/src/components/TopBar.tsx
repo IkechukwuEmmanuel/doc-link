@@ -5,6 +5,7 @@ import ConnectionIndicator, { ConnectionState } from "./ConnectionIndicator";
 import CopyButton from "./CopyButton";
 import PresenceStack, { PresencePeer } from "./PresenceStack";
 import ThemeToggle from "./ThemeToggle";
+import { useAuth } from "../auth";
 
 interface Props {
   slug: string;
@@ -12,11 +13,22 @@ interface Props {
   connection: ConnectionState;
   theme: "light" | "dark";
   onToggleTheme: () => void;
+  canClaim?: boolean;
+  onClaim?: () => void;
 }
 
 const dismissKey = (slug: string) => `spacepad-hint-dismissed:${slug}`;
 
-export default function TopBar({ slug, peers, connection, theme, onToggleTheme }: Props) {
+export default function TopBar({
+  slug,
+  peers,
+  connection,
+  theme,
+  onToggleTheme,
+  canClaim,
+  onClaim,
+}: Props) {
+  const { user, logout } = useAuth();
   const [hintDismissed, setHintDismissed] = useState(
     () => localStorage.getItem(dismissKey(slug)) === "1"
   );
@@ -38,7 +50,12 @@ export default function TopBar({ slug, peers, connection, theme, onToggleTheme }
       <div className="topbar-right">
         <PresenceStack peers={peers} />
         <ConnectionIndicator state={connection} />
-        {!hintDismissed && (
+        {user && canClaim && (
+          <button type="button" className="claim-btn" onClick={onClaim}>
+            Claim this pad
+          </button>
+        )}
+        {!user && !hintDismissed && (
           <span className="signin-hint">
             <Link to="/login">Sign in to keep this pad forever</Link>
             <button
@@ -48,6 +65,16 @@ export default function TopBar({ slug, peers, connection, theme, onToggleTheme }
               aria-label="Dismiss"
             >
               ✕
+            </button>
+          </span>
+        )}
+        {user && (
+          <span className="topbar-user">
+            <span className="topbar-user-name" title={user.email}>
+              {user.display_name || user.email}
+            </span>
+            <button type="button" className="text-link" onClick={logout}>
+              Log out
             </button>
           </span>
         )}

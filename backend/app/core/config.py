@@ -24,6 +24,19 @@ class Settings(BaseSettings):
     clamav_port: int = 3310
     clamav_enabled: bool = False
 
+    # Auth (Phase 4).
+    jwt_secret: str = "change-me-in-production"
+    jwt_access_ttl_seconds: int = 900
+    jwt_refresh_ttl_seconds: int = 2592000
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    # Where the Google callback sends the browser back to after login.
+    frontend_base_url: str = "http://localhost:5173"
+
+    @property
+    def cookies_secure(self) -> bool:
+        return self.environment != "development"
+
     # Upload caps (Phase 3). Kept here as configurable constants, not magic numbers.
     anon_max_files_per_pad: int = 5
     anon_max_file_bytes: int = 10 * 1024 * 1024
