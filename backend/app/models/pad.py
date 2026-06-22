@@ -24,6 +24,11 @@ class Visibility(str, enum.Enum):
     private = "private"
 
 
+class CollaboratorRole(str, enum.Enum):
+    viewer = "viewer"
+    editor = "editor"
+
+
 class Pad(Base, TimestampMixin):
     __tablename__ = "pads"
 
@@ -39,6 +44,10 @@ class Pad(Base, TimestampMixin):
         default=Visibility.public_edit,
         nullable=False,
     )
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=sa.text('false')
+    )
 
     # Phase 1: plain text body. Phase 2 adds the CRDT snapshot alongside.
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -51,3 +60,31 @@ class Pad(Base, TimestampMixin):
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
     is_anonymous: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class PadCollaborator(Base):
+    __tablename__ = "pad_collaborators"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    pad_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("pads.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[CollaboratorRole] = mapped_column(
+        Enum(CollaboratorRole, name="collaborator_role"),
+        nullable=False,
+    )
+    invited_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("pad_id", "user_id", name="uqe_pad_collaborator_pad_user"),
+    )

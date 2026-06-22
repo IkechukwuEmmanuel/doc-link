@@ -1,4 +1,3 @@
-
 # DECISIONS.md
 
 This file logs implementation choices made by the build agent where the PRD was
@@ -114,3 +113,13 @@ regenerate (bounded retries) before widening the number range.
 - **Model drift partially closed**: added `User.display_name` (column existed since
   migration `610b7d4ad610`). `pads.is_archived`/`pads.name` remain model-less until the
   phase that uses them (Phase 5).
+
+### Phase 5 — Authenticated features
+- **Phase 5 data model completion → Decision**: Add `name` and `is_archived` columns to the `Pad` model (already present in DB) and create the `PadCollaborator` model with `viewer`/`editor` roles, `invited_at`, `accepted_at`, and a unique constraint on (`pad_id`, `user_id`). Rationale: Brings the ORM in sync with the existing DB schema, enables collaborator management and pad metadata needed for the dashboard and fine‑grained access control.
+- **Visibility enforcement choice**: For private pads, `GET /api/pads/{slug}` returns 403 (not 404) when the user lacks access. This reveals existence but not content, matching the principle that private pads are "unlisted" rather than "hidden". WebSocket connections to private rooms are rejected with close code 4403 before any CRDT state is exchanged.
+- **Collaborator invite flow**: `POST /api/pads/{slug}/collaborators` accepts `{ email, role }` and creates a `PadCollaborator` row immediately if the email matches an existing user. If no matching user exists, returns 422 (out of scope for v1 per PRD §5.5). No separate "accept invite" step in v1.
+- **Pad management endpoints**: `PATCH /api/pads/{slug}` handles metadata updates (name, visibility, is_archived) separately from content updates (`PUT`). This separation keeps auth rules clear: metadata changes are owner-only, while content writes follow visibility rules. `DELETE /api/pads/{slug}` hard-deletes with cascade to files and collaborators.
+- **Dashboard route**: `/account/pads` added to router, gated by auth check using existing `AuthProvider` session state. Redirects to `/login` if no session.
+- **Table layout confirmed**: Using table layout for the dashboard (not provisional) as it provides the information-dense view appropriate for this audience.
+- **Inline controls**: Rename, visibility, archive/delete all use inline controls without modals, consistent with anti-pattern rules.
+- **New pad from dashboard**: Authenticated pad creation sets `owner_id` at creation time, no separate claim step needed.
