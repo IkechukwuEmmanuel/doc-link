@@ -10,6 +10,8 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
+    text,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -46,7 +48,7 @@ class Pad(Base, TimestampMixin):
     )
     name: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     is_archived: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False, server_default=sa.text('false')
+        Boolean, default=False, nullable=False, server_default=text('false')
     )
 
     # Phase 1: plain text body. Phase 2 adds the CRDT snapshot alongside.
