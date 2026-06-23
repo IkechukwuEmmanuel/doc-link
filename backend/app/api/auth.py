@@ -12,9 +12,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.models.token import TokenPurpose
 from app.models.user import User
-from app.schemas.auth import AuthOut, LoginIn, SignupIn, UserOut
+from app.schemas.auth import (
+    AuthOut,
+    EmailVerifyConfirmIn,
+    LoginIn,
+    PasswordResetConfirmIn,
+    PasswordResetRequestIn,
+    SignupIn,
+    UserOut,
+)
 from app.services import auth as auth_service
+from app.services import email as email_service
+from app.services import token as token_service
 from app.services import user as user_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -106,6 +117,87 @@ async def logout(response: Response):
 
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)):
+    return user
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_202_ACCEPTED)
+async def password_reset_request(
+    body: PasswordResetRequestIn, db: AsyncSession = Depends(get_db)
+):
+    """Email a single-use reset link. Always 202 — never reveal whether an
+    account exists for the address (PRD §6.4)."""
+    user = await user_service.get_by_email(db, body.email)
+    if user is not None and user.password_hash is not None:
+        raw = await token_service.issue(
+            db,
+            user_id=user.id,
+            purpose=TokenPurpose.password_reset,
+            ttl_seconds=settings.password_reset_ttl_seconds,
+        )
+        link = f"{settings.frontend_base_url}/reset-password?token={raw}"
+        subject, message = email_service.password_reset_email(link)
+        await email_service.send_email(to=user.email, subject=subject, body=message)
+    return {"status": "accepted"}
+
+
+@router.post("/password-reset/confirm", response_model=AuthOut)
+async def password_reset_confirm(
+    body: PasswordResetConfirmIn, response: Response, db: AsyncSession = Depends(get_db)
+):
+    user_id = await token_service.consume(
+        db, raw=body.token, purpose=TokenPurpose.password_reset
+    )
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This reset link is invalid or has expired.",
+        )
+    user = await user_service.get_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Account no longer exists."
+        )
+    await user_service.set_password(db, user, body.new_password)
+    _set_refresh_cookie(response, user)
+    return _auth_payload(user)
+
+
+@router.post("/verify-email/request", status_code=status.HTTP_202_ACCEPTED)
+async def verify_email_request(
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
+    if user.email_verified:
+        return {"status": "already_verified"}
+    raw = await token_service.issue(
+        db,
+        user_id=user.id,
+        purpose=TokenPurpose.email_verify,
+        ttl_seconds=settings.password_reset_ttl_seconds,
+    )
+    link = f"{settings.frontend_base_url}/verify-email?token={raw}"
+    subject, message = email_service.verify_email_email(link)
+    await email_service.send_email(to=user.email, subject=subject, body=message)
+    return {"status": "accepted"}
+
+
+@router.post("/verify-email/confirm", response_model=UserOut)
+async def verify_email_confirm(
+    body: EmailVerifyConfirmIn, db: AsyncSession = Depends(get_db)
+):
+    user_id = await token_service.consume(
+        db, raw=body.token, purpose=TokenPurpose.email_verify
+    )
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This verification link is invalid or has expired.",
+        )
+    user = await user_service.get_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Account no longer exists."
+        )
+    await user_service.mark_email_verified(db, user)
     return user
 
 

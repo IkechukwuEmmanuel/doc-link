@@ -123,3 +123,85 @@ regenerate (bounded retries) before widening the number range.
 - **Table layout confirmed**: Using table layout for the dashboard (not provisional) as it provides the information-dense view appropriate for this audience.
 - **Inline controls**: Rename, visibility, archive/delete all use inline controls without modals, consistent with anti-pattern rules.
 - **New pad from dashboard**: Authenticated pad creation sets `owner_id` at creation time, no separate claim step needed.
+
+### Phase 5–7 continuation (implementation notes)
+
+**Model/migration reconciliation.** The `Pad.name` column is `String(120)` to match
+the pre-existing migration `726857c6f636` (the model had drifted to 255). The
+`PadCollaborator` unique constraint is named `uq_pad_collaborator_pad_user` to match
+migration `e5f8b2c3d4a1`. Two new migrations were added on the existing linear chain:
+`f1a2b3c4d5e6` (`pads.cold_storage_eligible`, Phase 6) and `a7b8c9d0e1f2`
+(`email_tokens`, Phase 7). `alembic heads` is a single head.
+
+**Access-control single source of truth.** `app/services/access.py` holds the
+read/write rules (`can_read`, `can_write_content`, `is_owner`). Both the REST layer
+(`api/pads.py`) and the WS layer (`api/ws.py` → `authorize_ws`) call it, so there is
+exactly one place the visibility matrix lives. Content writes (`PUT`, live WS) follow
+the visibility rules; metadata writes (`PATCH`, `DELETE`, collaborator management) are
+owner-only, checked separately.
+
+**WebSocket auth transport → query param.** The access token is read from the `?token=`
+query parameter on the WS handshake, because a browser WebSocket cannot set an
+`Authorization` header and y-websocket appends connection params to the URL. The gate
+runs in `authorize_ws` *before* `websocket.accept()`; rejection closes with code 4403
+(no access) / 4404 (bad slug) / 4429 (rate limited) before any CRDT bytes flow. A
+viewer (read-only) is intentionally **not** given the live socket — the live channel is
+bidirectional and a read-only Yjs room isn't worth the complexity for v1; viewers read
+via REST and the frontend renders them a static, read-only surface. Documented so the
+"viewer can't join WS" behaviour isn't mistaken for a bug.
+
+**Pad deletion is explicit, not FK-cascade-only.** `delete_pad` removes storage objects,
+file rows, and collaborator rows explicitly before deleting the pad, so behaviour is
+identical on Postgres and the SQLite test harness (where `ondelete=CASCADE` isn't
+enforced without `PRAGMA foreign_keys`) and storage objects are never orphaned.
+
+### Phase 6 — Rate limiting & abuse prevention
+- **Token-bucket limiter** (`app/services/ratelimit.py`). Pad creation is guarded by two
+  buckets — 10/IP/hour and a 1-per-5-seconds burst — and WS edits by a 60/min/connection
+  bucket, matching PRD §5.4. IP keys are a salted SHA-256 (`ip_hash_salt`); raw IPs are
+  never stored (PRD §6.4). REST limit → 429 with a `Retry-After` header; WS limit → close
+  code 4429 with a human-readable reason the frontend renders distinctly.
+- **⚠️ BLOCKER — Redis required at launch (fails open until then).** The limiter enforces
+  cross-process via Redis (atomic Lua token bucket). `init()` pings Redis in the app
+  lifespan; if Redis is unreachable (or `init()` never ran, as in the ASGI test harness),
+  the limiter **fails open** — requests are allowed. Rate limiting is best-effort abuse
+  prevention, not a security control, so an infra outage must not take down pad creation.
+  The launch task is to run Redis and confirm `init()` wires it (mirrors the ClamAV
+  precedent). Tests prove the algorithm + endpoint behaviour by injecting an in-memory
+  backend.
+- **Cold-storage flagging** (`app/services/coldstorage.py`). A plain async
+  `flag_cold_pads()` sets `cold_storage_eligible=True` on pads whose `last_opened_at` is
+  older than `cold_storage_after_days` (default 365). Per PRD §5.4 this is a storage-cost
+  marker, **not** deletion and **not** user-facing expiry — no "expiring soon" UI exists.
+  Driven two ways (the boring option, no new dependency): a cron entry point
+  (`python -m app.services.coldstorage`) and an optional in-process daily asyncio loop
+  started from the lifespan. APScheduler was deliberately *not* added.
+
+### Phase 7 — Polish & hardening
+- **Password reset & email verification** (`api/auth.py`, `services/token.py`,
+  `models/token.py`). Single-use, time-boxed tokens (`email_tokens`): only a SHA-256 hash
+  is stored, the raw token lives only in the emailed link. Reset TTL is 1 hour (PRD §5.6).
+  `consume()` collapses every failure mode (unknown / wrong purpose / expired / used) to a
+  single "invalid" result so there's no oracle. Reset *request* always returns 202 and
+  never reveals whether an account exists.
+- **Email-verified gate on private pads.** `PATCH /api/pads/{slug}` with
+  `visibility: private` is rejected (403) unless `user.email_verified` (PRD §5.6). Google
+  OAuth users are already verified; password users must complete the verify flow first.
+- **⚠️ BLOCKER — no email provider wired.** `app/services/email.py` *logs* messages
+  (including the action link) when `EMAIL_PROVIDER` is empty (the default), so reset/verify
+  flows are exercisable end-to-end in dev but nothing is actually delivered. The boring
+  launch choice is SMTP (works with Postmark/SES/Mailgun, no vendor SDK lock-in); set
+  `EMAIL_PROVIDER` + credentials and implement the `send_email` branch. Same stub-and-flag
+  precedent as ClamAV.
+- **Security review.** CORS is locked to an explicit allowlist (`CORS_ORIGINS`, not `*`)
+  with `allow_credentials=True` — verified in `app/main.py`. XSS: there is no raw-HTML
+  render path — CodeMirror is plain text, the read-only viewer renders content as an
+  escaped React text node, `/raw` is `text/plain`, and the dashboard renders names/slugs
+  as text nodes. Confirmed by grep for `dangerouslySetInnerHTML`/`innerHTML` (none).
+- **Accessibility.** The dashboard's hover-revealed row actions are always real,
+  focus-reachable `<button>`s revealed via `:hover`/`:focus-within` (and always visible on
+  touch / `hover: none`), satisfying the keyboard + touch requirement (dashboard spec §2).
+  Global `:focus-visible` outline, table header `scope`, `aria-haspopup`/`aria-expanded`
+  on the visibility control, `role=menuitemradio` options, and a `.visually-hidden` label
+  on the actions column. A full automated axe-core pass against a running instance remains
+  a launch-time verification step (no browser harness in this environment).

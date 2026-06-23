@@ -6,13 +6,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
 
 from app.core.config import get_settings
+from app.services import hashing
 
 settings = get_settings()
-_ph = PasswordHasher()
 _ALGORITHM = "HS256"
 
 ACCESS = "access"
@@ -24,16 +22,11 @@ class TokenError(Exception):
 
 
 def hash_password(password: str) -> str:
-    return _ph.hash(password)
+    return hashing.hash_secret(password)
 
 
 def verify_password(password_hash: str, password: str) -> bool:
-    try:
-        return _ph.verify(password_hash, password)
-    except VerifyMismatchError:
-        return False
-    except Exception:
-        return False
+    return hashing.verify_secret(password_hash, password)
 
 
 def _encode(sub: uuid.UUID, token_type: str, ttl_seconds: int) -> str:

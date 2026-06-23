@@ -10,6 +10,11 @@ import { PresencePeer } from "./PresenceStack";
 import { presenceColorForIndex } from "../styles/presence";
 import { ConnectionState } from "./ConnectionIndicator";
 import { editorTheme } from "./collabTheme";
+import { useAuth } from "../auth";
+
+// WS close codes the backend uses to reject a handshake (see app/api/ws.py).
+const CLOSE_NO_ACCESS = 4403;
+const CLOSE_RATE_LIMITED = 4429;
 
 interface Props {
   slug: string;
@@ -47,6 +52,7 @@ export default function CollabEditor({
   onConnectionChange,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const { getAccessToken } = useAuth();
 
   useEffect(() => {
     const host = hostRef.current;
@@ -55,7 +61,12 @@ export default function CollabEditor({
     const ydoc = new Y.Doc();
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const url = `${proto}//${window.location.host}/api/pads/${encodeURIComponent(slug)}`;
-    const provider = new WebsocketProvider(url, "ws", ydoc);
+    // The access token rides as a query param — a browser WS handshake can't set
+    // an Authorization header (matches the backend's documented choice).
+    const token = getAccessToken();
+    const provider = new WebsocketProvider(url, "ws", ydoc, {
+      params: token ? { token } : {},
+    });
     const ytext = ydoc.getText("content");
 
     const me = localUser();
@@ -99,7 +110,9 @@ export default function CollabEditor({
     provider.awareness.on("change", updatePeers);
 
     let hasConnected = false;
+    let rejected = false;
     const onStatus = ({ status }: { status: string }) => {
+      if (rejected) return;
       if (status === "connected") {
         onConnectionChange(hasConnected ? "reconnected" : "connected");
         hasConnected = true;
@@ -108,6 +121,21 @@ export default function CollabEditor({
       }
     };
     provider.on("status", onStatus);
+
+    // A permission rejection (4403) is not a network drop — stop reconnecting
+    // and surface a distinct "no access" state instead of "reconnecting…".
+    const onClose = (event: CloseEvent | null) => {
+      if (
+        event &&
+        (event.code === CLOSE_NO_ACCESS || event.code === CLOSE_RATE_LIMITED)
+      ) {
+        rejected = true;
+        provider.shouldConnect = false;
+        provider.disconnect();
+        onConnectionChange("noaccess");
+      }
+    };
+    provider.on("connection-close", onClose);
 
     const view = new EditorView({
       parent: host,
@@ -128,6 +156,7 @@ export default function CollabEditor({
     return () => {
       provider.off("sync", trySeed);
       provider.off("status", onStatus);
+      provider.off("connection-close", onClose);
       provider.awareness.off("change", updatePeers);
       view.destroy();
       provider.destroy();

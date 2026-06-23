@@ -16,7 +16,10 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# Migrations run on the direct/session connection, NOT the transaction-mode
+# pooler — Alembic needs session-level features (advisory locks, DDL in a
+# transaction) that transaction pooling breaks. See Settings.migration_database_url.
+config.set_main_option("sqlalchemy.url", get_settings().migration_database_url)
 
 target_metadata = Base.metadata
 

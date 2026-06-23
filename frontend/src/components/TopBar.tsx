@@ -70,6 +70,9 @@ export default function TopBar({
         )}
         {user && (
           <span className="topbar-user">
+            <Link to="/account/pads" className="text-link">
+              My Pads
+            </Link>
             <span className="topbar-user-name" title={user.email}>
               {user.display_name || user.email}
             </span>

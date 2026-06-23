@@ -31,6 +31,11 @@ class CollaboratorRole(str, enum.Enum):
     editor = "editor"
 
 
+class PinFormat(str, enum.Enum):
+    numeric = "numeric"
+    alphanumeric = "alphanumeric"
+
+
 class Pad(Base, TimestampMixin):
     __tablename__ = "pads"
 
@@ -46,7 +51,7 @@ class Pad(Base, TimestampMixin):
         default=Visibility.public_edit,
         nullable=False,
     )
-    name: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    name: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     is_archived: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, server_default=text('false')
     )
@@ -62,6 +67,22 @@ class Pad(Base, TimestampMixin):
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
     is_anonymous: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Phase 6: storage-cost marker for pads untouched past the cold-storage
+    # window. NOT deletion and NOT user-facing "expiry" — see DECISIONS.md.
+    cold_storage_eligible: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
+
+    # PIN protection (orthogonal to `visibility`): anyone with the link + the PIN
+    # can get in. `pin_protected` is an explicit flag, not inferred from pin_hash,
+    # for clarity. Never store the PIN in plaintext (argon2 hash only).
+    pin_protected: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
+    pin_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pin_format: Mapped[PinFormat | None] = mapped_column(
+        Enum(PinFormat, name="pin_format"), nullable=True
+    )
 
 
 class PadCollaborator(Base):
@@ -88,5 +109,32 @@ class PadCollaborator(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("pad_id", "user_id", name="uqe_pad_collaborator_pad_user"),
+        UniqueConstraint("pad_id", "user_id", name="uq_pad_collaborator_pad_user"),
+    )
+
+
+class PadPinUnlock(Base):
+    """A time-boxed unlock session for a PIN-protected pad.
+
+    The opaque ``unlock_token`` is handed to the client as an httpOnly cookie;
+    access is granted while ``expires_at`` is in the future. Expiry is checked on
+    every access, so stale rows are harmless — a cleanup job just reaps them.
+    """
+
+    __tablename__ = "pad_pin_unlocks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    pad_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("pads.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    unlock_token: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
+    unlocked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
     )
