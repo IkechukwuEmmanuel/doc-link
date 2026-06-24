@@ -22,10 +22,10 @@ from dataclasses import dataclass
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
+from app.api import deps
 from app.db.session import SessionLocal
 from app.models.pad import Pad
 from app.services import access as access_service
-from app.services import auth as auth_service
 from app.services import pin as pin_service
 from app.services import ratelimit
 from app.services import slug as slug_service
@@ -65,12 +65,17 @@ async def authorize_ws(
         if pad is None:
             return Authorization(allowed=True)
 
+        # Resolve the user from the handshake ``?token=`` access token. Supabase
+        # ES256 tokens are verified against the project JWKS (legacy HS256 is
+        # accepted only outside production) — same path as REST, in deps.py.
         user = None
         if token:
             try:
-                user_id = auth_service.decode_token(token, auth_service.ACCESS)
-                user = await user_service.get_by_id(db, user_id)
-            except auth_service.TokenError:
+                claims, is_supabase = deps.verify_access_token(token)
+                user = await user_service.get_or_sync_from_claims(
+                    db, claims, mark_verified=is_supabase
+                )
+            except deps.AuthError:
                 user = None
 
         # PIN gate first: a locked pad rejects with a distinct code so the client

@@ -205,3 +205,131 @@ enforced without `PRAGMA foreign_keys`) and storage objects are never orphaned.
   on the visibility control, `role=menuitemradio` options, and a `.visually-hidden` label
   on the actions column. A full automated axe-core pass against a running instance remains
   a launch-time verification step (no browser harness in this environment).
+
+### Supabase migration + PIN-protected pads (2026-06-24)
+
+**Architecture — FastAPI stays the single backend (not relitigated).** The frontend
+continues to talk *only* to FastAPI's REST/WS surface. Supabase's role is narrowed to
+two things: (a) the managed Postgres that SQLAlchemy connects to, and (b) the auth
+provider FastAPI calls instead of its own argon2/JWT code. The alternative — frontend
+calling Supabase directly, FastAPI shrunk to CRDT/files/PIN — was rejected because:
+- Phases 1–4 are built and tested against FastAPI's own REST/WS surface; rewriting it
+  to call Supabase directly rewrites working, tested code for no new functionality at a
+  time when the priority is shipping, not architectural elegance.
+- The hardest part of the system — CRDT merging via `pycrdt` — has no Supabase
+  equivalent and must stay custom FastAPI code regardless; moving auth/CRUD to Supabase
+  directly would not simplify the actually-hard part.
+- One backend means one place enforces business rules (visibility, PIN gating,
+  collaborator permissions). Splitting enforcement across Postgres RLS *and* FastAPI is a
+  known source of access-control drift bugs.
+
+**Accepted trade-offs of that choice (costs, not oversights):**
+- Every request round-trips through FastAPI before reaching Supabase's Postgres — an
+  extra hop versus Supabase's auto-generated REST layer, surfacing as latency if FastAPI
+  and Supabase aren't co-located. If measured post-launch, the fix is colocating infra,
+  not reopening this decision.
+- We forgo Supabase's auto-generated CRUD API and Postgres RLS as a free safety net. All
+  access control (visibility, collaborator, PIN checks) lives in FastAPI application
+  code — the model already in use. RLS is intentionally **not** a second enforcement
+  layer (the live tables show `rls_enabled=true` with no policies; FastAPI connects via a
+  privileged pooled role that bypasses RLS, so this is a default, not a relied-upon gate).
+
+**Database connection split.** App runtime traffic uses Supabase's *transaction-mode*
+pooler (port 6543, `DATABASE_URL`); Alembic migrations use the *direct/session* endpoint
+(`DATABASE_URL_DIRECT`, exposed as `Settings.migration_database_url` and consumed by
+`alembic/env.py`). Transaction pooling multiplexes connections, so prepared statements
+are disabled in `app/db/session.py` (asyncpg `statement_cache_size=0`, unique statement
+names) — otherwise pgbouncer collides cached statements across clients. The asyncpg
+driver and the existing async engine setup are unchanged: this is configuration, not a
+rewrite. Migration state: the Supabase DB is at Alembic head `c3d4e5f6a7b8` (all tables
+incl. `pad_pin_unlocks`); `alembic` is the single source of truth, no hand-edits.
+
+**Auth → Supabase Auth (gotrue), with a retained legacy path for offline tests.**
+`app/api/auth.py` calls Supabase Auth (`app/services/supabase_auth.py`) for
+signup/login/refresh/logout/password-reset/email-verify/Google when
+`supabase_auth.client` is configured, and falls back to the Phase-4 local path
+(argon2 + self-minted HS256, `app/services/auth.py`) when it isn't. The branch is per
+request on `supabase_auth.client is None`; the two paths are mutually exclusive and
+**production runs Supabase only**. Rationale for keeping the legacy path rather than a
+hard cutover: the existing 95-test suite is built entirely against the local flow with no
+Supabase reachable, and this mirrors the established stub-and-flag precedent (ClamAV,
+Redis, email, the `deps.py` HS256 fallback). The Supabase branch is covered by
+`tests/test_supabase_auth_api.py` (a fake gotrue client).
+
+- **Live round-trip verified (2026-06-24)** against the real project
+  (`fwmbshufvlvknaencmtw`): gotrue `signup` (creates an unconfirmed `auth.users` row with
+  `display_name` in user_metadata, no session — `mailer_autoconfirm=false`), `login`
+  (`/token?grant_type=password` after confirming the address) and the `refresh_token`
+  grant all work and return **ES256** access tokens. A token minted by the live project
+  was fed through our own `app/api/deps.verify_access_token`, which verified it against the
+  project **JWKS** and extracted `sub`/`email`/`aud=authenticated`/`role` — the exact path
+  `get_or_sync_from_claims` consumes. The throwaway user was deleted afterward (0 left).
+  Two project-config follow-ups remain launch tasks, **not** code gaps: enable
+  `mailer_autoconfirm` (or wire real SMTP) so signup issues a session as the handler
+  expects, and **enable the Google provider** in the dashboard (`settings.external.google`
+  is currently `false`) before the Supabase Google OAuth flow can be exercised live.
+
+- **JWT verification (checked, not assumed).** The project issues **ES256** user tokens;
+  `app/api/deps.py` verifies them against the project **JWKS**
+  (`/auth/v1/.well-known/jwks.json`) with audience `authenticated`. The legacy HS256
+  self-minted token is accepted only outside `production` (the test harness). WS auth
+  (`app/api/ws.py`) now routes the `?token=` through the same `deps.verify_access_token`,
+  so the live and test paths share one verifier.
+- **`public.users` ↔ `auth.users` linkage.** The existing `users` table is a public-schema
+  *profile* keyed by the same UUID as `auth.users` (`public.users.id == auth.users.id`),
+  populated/refreshed from token claims and gotrue responses
+  (`user_service.upsert_profile` / `get_or_sync_from_claims`). No cross-schema DB foreign
+  key — Supabase manages `auth.users` lifecycle independently and a cross-schema FK to a
+  table we don't own is fragile; the matching-UUID invariant is enforced in application
+  code instead.
+- **Hand-rolled password-reset / email-verification removed from scope.** Supabase's
+  native `recover` / `resend` / `verify_otp` replace them in the Supabase path; the
+  reset-confirm contract `{token, new_password}` is preserved by exchanging the emailed
+  `token_hash` for a session then `update_user`-ing the password server-side. The
+  Phase-7 `email_tokens` flow remains wired **only** on the legacy path.
+- **Google OAuth via Supabase's native provider.** Migrated from the custom direct-to-
+  Google auth-code flow to Supabase's `/authorize` provider flow with server-side PKCE
+  (verifier stashed in a short-lived httpOnly cookie, exchanged at the callback). One auth
+  provider, not two parallel systems. The custom Google flow remains only on the legacy
+  (no-Supabase) path.
+- **Refresh-cookie posture preserved.** Supabase's refresh token is stored in the same
+  `httpOnly`/`Secure`/`SameSite=Lax` `spacepad_refresh` cookie scoped to `/api/auth`; the
+  access token goes to the SPA in the JSON body. Supabase's refresh token is never exposed
+  to client-side JS.
+
+**What deliberately did NOT change.** The CRDT/WebSocket layer and snapshot persistence
+(`pycrdt`, bytea column) are untouched — they just run against Supabase-hosted Postgres.
+File storage/scanning (`aioboto3` + `clamd`) is **not** moving to Supabase Storage in this
+phase (a separate explicit decision if ever wanted). Redis-backed rate limiting is
+untouched by the migration.
+
+**Test tiering.** Fast unit tests stay on in-memory SQLite (`aiosqlite`) — no
+Postgres-specific behavior is relied on by the existing suite, and the Supabase-hosted
+schema is validated separately by Alembic being at head against the real project. A
+dedicated Postgres integration tier (against Supabase or a local container) is the
+launch-time follow-up if Postgres-only behavior (e.g. JWKS-verified live tokens) needs
+end-to-end coverage; flagged so test/prod divergence is acknowledged, not silent.
+
+### PIN-protected pads
+- **Fourth protection mode, orthogonal to `visibility`.** A PIN-protected pad is reachable
+  by anyone with the link, needs no account, but is gated behind an owner-set PIN. It sits
+  between `public_edit` and `private`. PIN-protection is **mutually exclusive** with
+  `visibility: private` (private is a strictly stronger gate) — rejected server-side in
+  `PATCH /api/pads/{slug}` with a 422, in both directions, not merely hidden in the UI.
+- **Locked pads are visible, not hidden.** `GET /api/pads/{slug}` on a locked pad returns a
+  `locked: true` state with empty content (never leaks the body), so the frontend renders a
+  real "enter PIN" screen rather than a 404 or sign-in wall.
+- **Time-boxed unlock.** A correct PIN mints an opaque unlock token (`pad_pin_unlocks`) set
+  as a path-scoped httpOnly cookie, valid for `pin_unlock_window_seconds` (default 4h, a
+  `Settings` constant, not a magic number). Expiry is checked on every access; a daily
+  sweep (`coldstorage.purge_expired_unlocks`, riding the existing cold-storage loop and
+  cron entrypoint) reaps stale rows — housekeeping only, not required for correctness.
+- **Strict brute-force protection (launch-blocking for this feature).** Unlock attempts are
+  rate-limited per-pad-per-IP via the Phase-6 token bucket (`rl_pin_attempts_per_window`
+  default 5 / `rl_pin_window_seconds` default 300). A wrong PIN returns 401 "Incorrect PIN";
+  exceeding the limit returns a distinct 429 with `Retry-After`, so the frontend renders
+  each correctly. Verification is constant-time argon2 via the shared `services/hashing.py`
+  util (extracted so PIN hashing doesn't depend on the legacy auth service post-migration).
+- **WS parity.** The WebSocket handshake performs the same unlock-token check (close code
+  `4401`) before any CRDT state is exchanged, exactly as the visibility gate does for
+  private pads.

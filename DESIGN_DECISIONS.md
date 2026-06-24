@@ -121,6 +121,29 @@ Selections render at ~18% opacity of the peer's solid color. (Live wiring: Phase
   request screen always shows the same "if an account exists…" confirmation — the UI mirrors
   the backend's no-existence-oracle stance.
 
+## PIN-protected pads (Supabase + PIN phase)
+- **Locked-pad screen, not a modal or wall.** When `GET /api/pads/{slug}` returns
+  `locked: true`, the pad route renders a calm on-brand screen reusing the `auth-card`
+  pattern (`Pad.tsx` `LockedPad`): a short "This pad is locked" line, the `/slug` in muted
+  mono, and a single PIN field + submit. It reads as part of the editor chrome, not a
+  jarring interruption — consistent with the no-modal anti-pattern record below.
+- **Input adapts to `pin_format`.** A numeric PIN uses `inputMode="numeric"` +
+  `pattern="[0-9]*"` (keypad on mobile); an alphanumeric passcode uses a plain text input.
+  The field is `type="password"` either way so a shoulder-surfer can't read it.
+- **Two distinct inline error states (not one, not a toast).** A wrong PIN shows the
+  backend's inline "Incorrect PIN" message (`role="alert"`), matching the auth-page
+  validation pattern. A rate-limited 429 shows a *different* message — "Too many attempts,
+  try again in about N minute(s)" derived from `Retry-After` — and disables the input until
+  then, so a lockout never masquerades as a typo.
+- **No persistent "unlocked" banner.** Once unlocked, the pad behaves like any accessible
+  pad for the window; the existing connection/access-state indicators carry the state. We
+  deliberately did not add an always-on "you are unlocked" element for a background concern.
+- **Dashboard PIN toggle, orthogonal to visibility.** In `AccountPads.tsx` the inline
+  controls gain a PIN affordance (add / set format numeric|alphanumeric / remove) alongside
+  the visibility control. It is **hidden when `private` is selected**, mirroring the
+  server-side mutual-exclusion rule (`private` is a stronger gate) so the UI can't offer an
+  invalid combined state.
+
 ## Anti-patterns (spec §5)
 - Still none violated. No spinners on the homepage→pad transition, no modals (dashboard
   inline controls included), no toasts, no onboarding, no mascot. Connection status, copy

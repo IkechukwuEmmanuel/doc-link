@@ -16,11 +16,26 @@ calls additionally authenticate with the service-role key.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import secrets
+import urllib.parse
+
 import httpx
 
 from app.core.config import get_settings
 
 settings = get_settings()
+
+
+def pkce_pair() -> tuple[str, str]:
+    """Return ``(verifier, challenge)`` for an OAuth PKCE flow (S256). The
+    verifier is stashed in a short-lived httpOnly cookie at ``/authorize`` time
+    and replayed at the ``/token`` exchange; the challenge travels in the URL."""
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+    return verifier, challenge
 
 
 class SupabaseAuthError(Exception):
@@ -151,6 +166,32 @@ class SupabaseAuthClient:
         if resp.status_code >= 400:
             raise _error_from(resp)
         return resp.json() if resp.content else {}
+
+    # --- OAuth (Google et al.) via Supabase's provider integration --------- #
+    def authorize_url(self, *, provider: str, redirect_to: str, code_challenge: str) -> str:
+        """Build the gotrue ``/authorize`` URL the browser is redirected to.
+        Supabase then bounces through the provider (Google) and back to
+        ``redirect_to`` with a ``?code=`` we exchange server-side (PKCE)."""
+        query = urllib.parse.urlencode(
+            {
+                "provider": provider,
+                "redirect_to": redirect_to,
+                "code_challenge": code_challenge,
+                "code_challenge_method": "s256",
+            }
+        )
+        return f"{self._base}/authorize?{query}"
+
+    async def exchange_code_for_session(
+        self, *, auth_code: str, code_verifier: str
+    ) -> dict:
+        """Exchange an OAuth/PKCE ``code`` for a session
+        (``{access_token, refresh_token, user, ...}``)."""
+        return await self._post(
+            "/token?grant_type=pkce",
+            json={"auth_code": auth_code, "code_verifier": code_verifier},
+            headers=self._headers(),
+        )
 
     # --- admin (service-role) flows ---------------------------------------- #
     async def admin_create_user(

@@ -23,6 +23,7 @@ from sqlalchemy import update
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.pad import Pad
+from app.services import pin as pin_service
 
 logger = logging.getLogger("spacepad.coldstorage")
 settings = get_settings()
@@ -51,10 +52,22 @@ async def flag_cold_pads(now: datetime | None = None) -> int:
     return flagged
 
 
+async def purge_expired_unlocks(now: datetime | None = None) -> int:
+    """Reap expired ``pad_pin_unlocks`` rows. Expiry is enforced on every access
+    regardless, so this is housekeeping to keep the table bounded — it rides the
+    same daily sweep as cold-storage flagging (see DECISIONS.md). Returns count."""
+    async with SessionLocal() as db:
+        purged = await pin_service.purge_expired(db, now=now)
+    if purged:
+        logger.info("Purged %d expired PIN-unlock row(s)", purged)
+    return purged
+
+
 async def _run_loop() -> None:
     while True:
         try:
             await flag_cold_pads()
+            await purge_expired_unlocks()
         except Exception:  # never let the loop die on a transient DB error
             logger.exception("cold-storage sweep failed")
         await asyncio.sleep(_ONE_DAY_SECONDS)
@@ -79,7 +92,11 @@ def stop_scheduler() -> None:
         _task = None
 
 
+async def _sweep_once() -> tuple[int, int]:
+    return await flag_cold_pads(), await purge_expired_unlocks()
+
+
 if __name__ == "__main__":  # cron entry point
     logging.basicConfig(level=logging.INFO)
-    count = asyncio.run(flag_cold_pads())
-    print(f"cold-storage: flagged {count} pad(s)")
+    flagged, purged = asyncio.run(_sweep_once())
+    print(f"cold-storage: flagged {flagged} pad(s); purged {purged} expired unlock(s)")
