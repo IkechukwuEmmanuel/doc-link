@@ -19,6 +19,20 @@ interface Props {
 
 const dismissKey = (slug: string) => `spacepad-hint-dismissed:${slug}`;
 
+type WidthPreset = "narrow" | "standard" | "wide";
+const WIDTH_KEY = "spacepad-editor-width";
+
+function getWidthValue(preset: WidthPreset): number {
+  switch (preset) {
+    case "narrow":
+      return 600;
+    case "wide":
+      return 1024;
+    default:
+      return 740;
+  }
+}
+
 export default function TopBar({
   slug,
   peers,
@@ -32,11 +46,35 @@ export default function TopBar({
   const [hintDismissed, setHintDismissed] = useState(
     () => localStorage.getItem(dismissKey(slug)) === "1"
   );
+  const [widthPreset, setWidthPreset] = useState<WidthPreset>(() => {
+    const stored = localStorage.getItem(WIDTH_KEY);
+    return (stored as WidthPreset) || "standard";
+  });
+  const fullUrl = `${window.location.origin}/${slug}`;
 
   function dismissHint() {
     localStorage.setItem(dismissKey(slug), "1");
     setHintDismissed(true);
   }
+
+  function changeWidth(preset: WidthPreset) {
+    setWidthPreset(preset);
+    localStorage.setItem(WIDTH_KEY, preset);
+    document.documentElement.style.setProperty(
+      "--canvas-max-width",
+      `${getWidthValue(preset)}px`
+    );
+  }
+
+  useState(() => {
+    const stored = localStorage.getItem(WIDTH_KEY);
+    if (stored) {
+      document.documentElement.style.setProperty(
+        "--canvas-max-width",
+        `${getWidthValue(stored as WidthPreset)}px`
+      );
+    }
+  });
 
   return (
     <header className="topbar">
@@ -44,7 +82,7 @@ export default function TopBar({
         <Link to="/" className="brand-mark" aria-label="SpacePad home">
           ✦
         </Link>
-        <CopyButton value={slug} label={slug} ariaLabel={`Copy pad URL ${slug}`} />
+        <CopyButton value={fullUrl} label={slug} ariaLabel={`Copy pad URL ${slug}`} />
       </div>
 
       <div className="topbar-right">
@@ -81,6 +119,21 @@ export default function TopBar({
             </button>
           </span>
         )}
+        <div className="width-selector">
+          <label htmlFor="width-select" className="text-xs">
+            Width
+          </label>
+          <select
+            id="width-select"
+            value={widthPreset}
+            onChange={(e) => changeWidth(e.target.value as WidthPreset)}
+            className="width-select"
+          >
+            <option value="narrow">Narrow</option>
+            <option value="standard">Standard</option>
+            <option value="wide">Wide</option>
+          </select>
+        </div>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
       </div>
     </header>

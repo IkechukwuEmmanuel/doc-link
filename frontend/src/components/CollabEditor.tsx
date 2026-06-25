@@ -21,6 +21,8 @@ interface Props {
   seed: string;
   onPeersChange: (peers: PresencePeer[]) => void;
   onConnectionChange: (state: ConnectionState) => void;
+  fontSize?: string;
+  fontColor?: string;
 }
 
 interface AwarenessUser {

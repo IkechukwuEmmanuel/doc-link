@@ -11,6 +11,7 @@ import Landing from "./pages/Landing";
 import Pad from "./pages/Pad";
 import ResetPassword from "./pages/ResetPassword";
 import VerifyEmail from "./pages/VerifyEmail";
+import NewPad from "./pages/NewPad";
 
 const router = createBrowserRouter([
   { path: "/", element: <Landing /> },
@@ -20,6 +21,7 @@ const router = createBrowserRouter([
   { path: "/reset-password", element: <ResetPassword /> },
   { path: "/verify-email", element: <VerifyEmail /> },
   { path: "/account/pads", element: <AccountPads /> },
+    { path: "/new", element: <NewPad /> },
   { path: "/:slug", element: <Pad /> },
 ]);
 

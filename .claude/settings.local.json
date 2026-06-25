@@ -42,7 +42,30 @@
       "Bash(echo \"=== tsc exit: $? ===\")",
       "Bash(python -c \"import jwt, cryptography; print\\('PyJWT', jwt.__version__\\); print\\('cryptography', cryptography.__version__\\)\")",
       "Bash(python -c \"import sys; print\\(sys.executable\\)\")",
-      "Bash(python -c \"import cryptography; print\\('cryptography', cryptography.__version__\\)\")"
+      "Bash(python -c \"import cryptography; print\\('cryptography', cryptography.__version__\\)\")",
+      "Bash(/tmp/venv/bin/pytest -q)",
+      "Bash(/tmp/venv/bin/pytest tests/test_supabase_auth_api.py::test_supabase_login_success -q)",
+      "Bash(/tmp/venv/bin/pytest tests/test_supabase_auth_api.py -q)",
+      "Bash(/tmp/venv/bin/ruff check *)",
+      "Bash(/tmp/venv/bin/python *)",
+      "mcp__supabase__get_publishable_keys",
+      "mcp__supabase__get_project_url",
+      "mcp__supabase__execute_sql",
+      "Bash(npm --version)",
+      "Bash(docker-compose up *)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(docker exec *)",
+      "Bash(break)",
+      "Bash(/tmp/venv/bin/alembic upgrade *)",
+      "Bash(/tmp/venv/bin/alembic current *)",
+      "Bash(/tmp/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(echo \"backend pid $!\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "supabase"
+  ]
 }

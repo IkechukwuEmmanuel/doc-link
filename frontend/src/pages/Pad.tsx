@@ -84,7 +84,7 @@ export default function Pad() {
   if (status === "invalid")
     return (
       <div className="pad-state">
-        <p>“{slug}” isn’t a valid pad name.</p>
+        <p>"{slug}" isn't a valid pad name.</p>
         <Link className="text-link" to="/">
           Go home
         </Link>
@@ -117,7 +117,7 @@ export default function Pad() {
   if (status === "missing")
     return (
       <div className="pad-state">
-        <p>This pad doesn’t exist yet — create it?</p>
+        <p>This pad doesn't exist yet — create it?</p>
         <div className="pad-state-actions">
           <button className="btn btn-primary" onClick={createHere}>
             Create /{slug}
@@ -157,20 +157,24 @@ export default function Pad() {
         onClaim={claim}
       />
       <div className="pad-canvas-scroll">
-        <div className="pad-canvas">
-          {canEdit ? (
-            <CollabEditor
-              slug={slug}
-              seed={seed}
-              onPeersChange={setPeers}
-              onConnectionChange={setConnection}
-            />
-          ) : (
-            <div className="editor editor--readonly" aria-readonly="true">
-              {pad?.content || ""}
-            </div>
-          )}
-          <FileTray slug={slug} />
+        <div className="pad-layout">
+          <div className="pad-canvas">
+            {canEdit ? (
+              <CollabEditor
+                slug={slug}
+                seed={seed}
+                onPeersChange={setPeers}
+                onConnectionChange={setConnection}
+              />
+            ) : (
+              <div className="editor editor--readonly" aria-readonly="true">
+                {pad?.content || ""}
+              </div>
+            )}
+          </div>
+          <aside className="pad-file-side">
+            <FileTray slug={slug} />
+          </aside>
         </div>
       </div>
     </div>
@@ -183,9 +187,7 @@ interface LockedPadProps {
   onUnlocked: (pad: PadModel) => void;
 }
 
-/** Calm, on-brand locked screen (not a modal). A correct PIN unlocks the pad for
- *  the session window; an incorrect PIN and a rate-limited lockout render as
- *  distinct inline messages, consistent with the auth pages' error style. */
+/** Calm, on-brand locked screen (not a modal). A correct PIN unlocks the pad for the session window; an incorrect PIN and a rate-limited lockout render as distinct inline messages, consistent with the auth pages' error style. */
 function LockedPad({ slug, pinFormat, onUnlocked }: LockedPadProps) {
   const { theme, toggle } = useTheme();
   const { authedFetch } = useAuth();
@@ -193,17 +195,35 @@ function LockedPad({ slug, pinFormat, onUnlocked }: LockedPadProps) {
   const [error, setError] = useState("");
   const [lockedOut, setLockedOut] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [visualError, setVisualError] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const numeric = pinFormat === "numeric";
 
+  // Auto-submit logic for numeric PINs
   useEffect(() => {
-    inputRef.current?.focus();
+    if (!submitting && !lockedOut) {
+      if (numeric && pin.length >= 4 && pin.length <= 6) {
+        submitPin();
+      }
+    }
+  }, [pin, submitting, lockedOut, numeric]);
+
+  // Handle Enter key press
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !submitting && !lockedOut) {
+        e.preventDefault();
+        submitPin();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submitPin() {
     if (!pin || submitting) return;
     setSubmitting(true);
+    setVisualError(false);
     setError("");
     try {
       const result = await unlockPad(slug, pin, authedFetch);
@@ -219,59 +239,62 @@ function LockedPad({ slug, pinFormat, onUnlocked }: LockedPadProps) {
             ? `Too many attempts. Try again in about ${mins} minute${mins === 1 ? "" : "s"}.`
             : result.message
         );
-      } else {
-        setError(result.message);
+        setVisualError(true);
+        return;
       }
-      setPin("");
+      setError(result.message);
+      setVisualError(true);
+      setTimeout(() => {
+        setVisualError(false);
+      }, 3000);
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <main className="auth-page">
-      <div className="landing-corner">
-        <ThemeToggle theme={theme} onToggle={toggle} />
+    <div className="locked-pad-overlay" role="alertdialog" aria-label="Pad Unlock Required">
+      <div className="wavy-background">
+        <svg className="wavy-lines" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path className="wave-1" d="M0 30 Q25 20 50 30 T100 30 L100 100 L0 100 Z" />
+          <path className="wave-2" d="M0 50 Q25 40 50 50 T100 50 L100 100 L0 100 Z" />
+          <path className="wave-3" d="M0 70 Q25 60 50 70 T100 70 L100 100 L0 100 Z" />
+        </svg>
       </div>
 
-      <form className="auth-card" onSubmit={submit}>
-        <h1 className="auth-title">This pad is locked</h1>
-        <p className="pad-locked-hint">
+      <div className="content-container">
+        <div className="landing-corner">
+          <ThemeToggle theme={theme} onToggle={toggle} />
+        </div>
+
+        <h2 className="locked-pad-title">This pad is locked</h2>
+        <p className="locked-pad-hint">
           Enter the {numeric ? "PIN" : "passcode"} to view <code>/{slug}</code>.
         </p>
 
-        <label className="auth-field">
+        <label className="locked-input-label">
           <span>{numeric ? "PIN" : "Passcode"}</span>
           <input
             ref={inputRef}
             type="password"
             inputMode={numeric ? "numeric" : "text"}
-            pattern={numeric ? "[0-9]*" : undefined}
+            pattern={numeric ? "[0-9]*" : "[a-zA-Z0-9]*"}
             autoComplete="off"
             value={pin}
-            disabled={lockedOut}
+            disabled={lockedOut || submitting}
             onChange={(e) => setPin(e.target.value)}
+            className={`locked-input ${visualError ? "has-error" : ""}`}
+            placeholder={numeric ? "1234" : "enter passcode"}
+            aria-label={numeric ? "PIN" : "Passcode"}
           />
         </label>
 
         {error && (
-          <p className="error" role="alert">
+          <p className="locked-input-error" role="alert" aria-live="polite">
             {error}
           </p>
         )}
-
-        <button
-          className="btn btn-primary"
-          type="submit"
-          disabled={submitting || lockedOut || !pin}
-        >
-          {submitting ? "…" : "Unlock"}
-        </button>
-
-        <Link className="text-link auth-home" to="/">
-          ← Back home
-        </Link>
-      </form>
-    </main>
+      </div>
+    </div>
   );
 }

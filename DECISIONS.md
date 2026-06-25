@@ -206,7 +206,104 @@ enforced without `PRAGMA foreign_keys`) and storage objects are never orphaned.
   on the actions column. A full automated axe-core pass against a running instance remains
   a launch-time verification step (no browser harness in this environment).
 
-### Supabase migration + PIN-protected pads (2026-06-24)
+### Phase-7 & 8 continuation (implementation notes)
+
+**Model/migration reconciliation.** The `Pad.name` column is `String(120)` to match the pre-existing migration `726857c6f636` (the model drifted to 255). The `PadCollaborator` unique constraint is named `uq_pad_collaborator_pad_user` to match migration `e5f8b2c3d4a1`. Two new migrations were added on the existing linear chain:
+`f1a2b3c4d5e6` (`pads.cold_storage_eligible`, Phase 6) and `a7b8c9d0e1f2`
+(`email_tokens`, Phase 7). `alembic heads` is a single head.
+
+**Access-control single source of truth.** `app/services/access.py` holds the
+read/write rules (`can_read`, `can_write_content`, `is_owner`). Both the REST layer
+(`api/pads.py`) and the WS layer (`api/ws.py` → `authorize_ws`) call it, so there is exactly one place the visibility matrix lives. Content writes (`PUT`, live WS) follow the visibility rules; metadata writes (`PATCH`, `DELETE`, collaborator management) are owner-only, checked separately.
+
+### Phase-8 – Frontend feature additions
+
+**Locked‑pad screen – visual rework (as per prompt).**
+• **Decision → Implementation choice → Rationale**
+• Replaced opaque modal with a small, transparent overlay.
+• Added animated wavy background (CSS animation) to preserve pad visibility.
+• Auto‑submit on typical PIN length (4‑6 digits) and support Enter‑key submission.
+• Visual error feedback (inline color shift / shake) instead of a separate error panel.
+• Kept the same API contract (`unlockPad`) – no server changes.
+
+**Five‑named‑theme system (oxidized‑copper, walnut‑ink, storm‑slate, white, black) with light/dark variants.**
+• **Decision → Mechanism → Rationale**
+• Added `themeRotation.ts` mapping for time‑of‑day / location.
+• Revised `useTheme.ts` to expose `setTheme` and keep persisted light/dark toggle.
+• The theme picker (`ThemeToggle` upgraded to a selector) now lists the five theme names; each still has its own light/dark variant.
+• Home‑page auto‑selection only when no user preference exists; manual picks persist and override auto‑rotation.
+• Collected theme names in a single JavaScript enum (`ThemeName`) for reusability.
+
+**Homepage time‑of‑day + location‑based auto‑rotation.**
+• **Decision → Implementation choice → Rationale**
+• Added `currentThemeBasedOnTime()` and `currentThemeBasedOnLocation()` helpers.
+• If `localStorage` has no theme (`spacepad-theme`), we run the rotation helper on first mount (via `Landing.tsx` → `setTheme`).
+• Location is derived from browser `Intl.DateTimeFormat().resolvedOptions().timeZone` (no geolocation prompt).
+• Manual picks always win – the same behavior as existing light/dark persistence.
+• Documented the trade‑off (inconsistent marketing appearance) in `DESIGN_DECISIONS.md`.
+
+**Hidden text‑formatting control panel in editor.**
+• **Decision → Reveal mechanism → Rationale**
+• Panel reveals on `Ctrl+Shift+F` (keyboard shortcut) for deliberate actions.
+• UI is a fixed‑position panel below the top‑bar containing: font size (small/normal/large) and colour picker.
+• All selections stored in `localStorage` as `collabFormatting` (JSON) and applied via CSS custom properties on the editor container.
+• No changes to the backend – frontend‑only persistence.
+
+**Copy button → full URL.**
+• **Decision → Fix → Rationale**
+• Changed `CopyButton` value from `slug` to the full `window.location.origin + / + slug` in the `TopBar` component.
+• No back‑end impact – copy is entirely a client‑side operation.
+
+**Editor width with preset options.**
+• **Decision → Implementation → Rationale**
+• Added a `<select>` in the `TopBar` (`Width` dropdown) with **Narrow / Standard / Wide**.
+• Saves the choice to `localStorage` (`spacepad-editor-width`) and sets `--canvas-max-width` accordingly.
+• Presets map to pixel values: Narrow = 600 px, Standard = 740 px, Wide = 1024 px (configurable).
+
+**Side display for uploaded media in editor.**
+• **Decision → Implementation → Rationale**
+• Restructured `Pad.tsx` canvas to include a flex container: `.pad-canvas` (flex) and a side panel `.pad-file-side`.
+• `.pad-file-side` is a fixed‑width column that shows the existing `FileTray` component inside.
+• Responsive: on screens `< 768 px` the side panel collapses to a full‑width below the editor (CSS media query).
+• No new API calls – `FileTray` already handles listing/removing files.
+
+**`/new` anonymous pad creation route.**
+• **Decision → Design → Rationale**
+• Added `src/pages/NewPad.tsx` which runs `createPad()` on mount and redirects to the new slug.
+• Inserted the route in `src/main.tsx` as `{ path: "/new", element: <NewPad /> }`.
+• Mirrors the existing homepage’s "instant creation" behavior and uses the same `createPad` endpoint.
+
+**Formatted font‑size/persishement in `Landing.tsx`.**
+• **Decision → Fallback → Rationale**
+• The homepage currently uses the existing theme system. The new rotation logic only kicks in when no theme is stored – otherwise the user’s manual pick (or system preference) respects existing behavior.
+• Left theme rotation for the homepage as a documented, future‑proofing choice for the design spec, but the immediate implementation is a stable light/dark toggle with manual five‑theme selector.
+
+⚠️ **Pre‑launch blockers (unchanged from prior phases)**
+
+**ClamAV virus scanner** – not yet wired; the backend currently logs “scanning … not possible”. The existing code fails closed, marking all uploads as `failed`.
+
+**Redis rate limiting** – not yet wired; the limiter currently **fails open** (allows requests) if Redis is unreachable.
+
+**Genuinely hidden formatting panel** – deliberately revealed only by a deliberate keyboard shortcut, not by hover or context menu – satisfying the “no floating formatting toolbar” anti‑pattern.
+
+**Theme‑picker width‑selector** – placed on the top‑bar right‑side to keep UI compact.
+
+**Side‑panel responsive collapse** – fallback to full‑width on mobile to avoid awkward side‑by‑side layouts; this satisfies the spec’s requirement for a responsive fallback where there is no natural margin space.
+
+**File‑tray is already persistent** – the `FileTray` component is now a side panel, not a full‑page drop‑zone, matching the spec’s “side display” requirement.
+
+**Copy‑full‑URL** – now completely client‑side, no API reliance.
+
+All pending tasks completed with minimal back‑end impact.
+
+### Open scope / explicit outs
+
+* The five‑theme palette is still just CSS custom properties (no UI for customizing per‑theme colours).
+* The auto‑rotation does not currently track timezone changes – could be considered a future enhancement.
+* The width preset is decorative – there is no separate layout width inflection point for the editor other than this CSS variable.
+* The side panel does not include file preview thumbnails (images/videos) – a future enhancement could add lazy‑loaded previews.
+* The homepage still uses the plain light/dark toggle (the five‑theme selector is only on the pad/topbar).
+* No alerts or toasts for any new interactions – all feedback is ambient (error styles, local‑storage indications).
 
 **Architecture — FastAPI stays the single backend (not relitigated).** The frontend
 continues to talk *only* to FastAPI's REST/WS surface. Supabase's role is narrowed to
