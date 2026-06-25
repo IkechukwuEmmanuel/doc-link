@@ -21,11 +21,16 @@ async def db_engine():
 
 
 @pytest_asyncio.fixture
-async def client(db_engine):
-    TestSession = async_sessionmaker(db_engine, expire_on_commit=False)
+async def session_factory(db_engine):
+    """Shared session factory — used by the get_db override and by tests that
+    need to set up DB state directly (e.g. private pads, collaborators)."""
+    return async_sessionmaker(db_engine, expire_on_commit=False)
 
+
+@pytest_asyncio.fixture
+async def client(session_factory):
     async def override_get_db():
-        async with TestSession() as session:
+        async with session_factory() as session:
             yield session
 
     app.dependency_overrides[get_db] = override_get_db

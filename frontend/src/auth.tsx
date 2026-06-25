@@ -31,6 +31,11 @@ interface AuthContextValue {
   ) => Promise<void>;
   logout: () => Promise<void>;
   authedFetch: (input: string, init?: RequestInit) => Promise<Response>;
+  // Current in-memory access token (for the WebSocket handshake, which can't
+  // set an Authorization header). May be null when signed out.
+  getAccessToken: () => string | null;
+  // Re-fetch the current user (e.g. after email verification flips a flag).
+  reloadUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -103,6 +108,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const getAccessToken = useCallback(() => accessToken.current, []);
+
   // Fetch wrapper that attaches the access token and retries once after a
   // transparent refresh on 401.
   const authedFetch = useCallback(
@@ -123,9 +130,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [refresh]
   );
 
+  const reloadUser = useCallback(async () => {
+    const resp = await authedFetch("/api/auth/me");
+    if (resp.ok) setUser(await resp.json());
+  }, [authedFetch]);
+
   return (
     <AuthContext.Provider
-      value={{ user, ready, login, signup, logout, authedFetch }}
+      value={{
+        user,
+        ready,
+        login,
+        signup,
+        logout,
+        authedFetch,
+        getAccessToken,
+        reloadUser,
+      }}
     >
       {children}
     </AuthContext.Provider>

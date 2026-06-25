@@ -239,6 +239,9 @@ body {
   color: var(--color-success);
   animation: conn-fade var(--dur-state) var(--ease-out);
 }
+.conn-noaccess {
+  color: var(--color-warning);
+}
 @keyframes conn-pulse {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
@@ -406,6 +409,10 @@ body {
   color: var(--color-text-muted);
   opacity: 0.55;
 }
+.editor--readonly {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 .save-indicator {
   position: absolute;
@@ -521,6 +528,317 @@ a.file-chip-name:hover {
   gap: var(--space-2);
 }
 
+/* ---------- accessibility helper ---------- */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- dashboard (Phase 5) ---------- */
+.dash {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-3);
+  line-height: var(--leading-scan);
+}
+.dash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.dash-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.dash-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin: 0;
+}
+.dash-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.dash-search {
+  padding: 8px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  min-width: 200px;
+}
+.dash-search:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.dash-toolbar {
+  margin-bottom: var(--space-2);
+}
+.dash-tabs {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+.dash-tab {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 6px 14px;
+  border-radius: calc(var(--radius-sm) - 2px);
+  cursor: pointer;
+}
+.dash-tab.is-active {
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+.dash-error {
+  margin: var(--space-2) 0;
+}
+.dash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-3);
+  color: var(--color-text-muted);
+  text-align: center;
+  min-height: 160px;
+}
+
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.dash-table thead th {
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  padding: var(--space-1);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.dash-col-size,
+.dash-cell-size {
+  text-align: right;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+.dash-row {
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.dash-row td {
+  padding: var(--space-1);
+  vertical-align: middle;
+}
+.dash-name-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  text-decoration: none;
+  color: var(--color-text-primary);
+}
+.dash-name-link:hover .dash-name {
+  text-decoration: underline;
+}
+.dash-name {
+  font-weight: 500;
+}
+.dash-name--slug {
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+.dash-name-slug {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.dash-rename-input {
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: 4px 8px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  width: 100%;
+  max-width: 260px;
+}
+.dash-cell-time {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* visibility inline control */
+.dash-vis {
+  position: relative;
+}
+.dash-vis-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.dash-vis-trigger:hover {
+  border-color: var(--color-border-subtle);
+  color: var(--color-text-primary);
+}
+.dash-vis-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  min-width: 180px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.dash-vis-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.dash-vis-option:hover,
+.dash-vis-option[aria-checked="true"] {
+  background: var(--color-bg);
+}
+
+/* PIN protection control (sits under the visibility control) */
+.dash-pin {
+  margin-top: 4px;
+  font-size: var(--text-xs);
+}
+.dash-pin-on {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+}
+.dash-pin-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.dash-pin-format,
+.dash-pin-input {
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 3px 6px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+.dash-pin-input {
+  width: 8ch;
+}
+.dash-pin-link {
+  border: none;
+  background: transparent;
+  color: var(--color-accent, var(--color-text-primary));
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.dash-pin-link:hover {
+  text-decoration: underline;
+}
+.dash-pin-link:disabled {
+  opacity: 0.5;
+  cursor: default;
+  text-decoration: none;
+}
+
+/* Locked-pad screen hint (reuses the auth-card chrome) */
+.pad-locked-hint {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* hover/focus-revealed row actions (keyboard + touch reachable) */
+.dash-actions {
+  display: inline-flex;
+  gap: var(--space-1);
+  opacity: 0;
+  transition: opacity var(--dur-micro) var(--ease-out);
+}
+.dash-row:hover .dash-actions,
+.dash-row:focus-within .dash-actions {
+  opacity: 1;
+}
+.dash-action {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+}
+.dash-action:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg);
+}
+.dash-action--danger:hover {
+  color: var(--color-danger);
+}
+.dash-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+}
+.dash-confirm-label {
+  color: var(--color-text-muted);
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 768px) {
   .hero-input {
@@ -534,5 +852,19 @@ a.file-chip-name:hover {
   .theme-toggle {
     min-width: 44px;
     min-height: 44px;
+  }
+  /* On touch (no hover), keep row actions visible — tap-and-hold/kebab
+     fallback per dashboard spec §2. */
+  .dash-actions {
+    opacity: 1;
+  }
+  .dash-name-slug {
+    display: none;
+  }
+}
+
+@media (hover: none) {
+  .dash-actions {
+    opacity: 1;
   }
 }

@@ -28,3 +28,16 @@ class UserOut(BaseModel):
 class AuthOut(BaseModel):
     access_token: str
     user: UserOut
+
+
+class PasswordResetRequestIn(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class EmailVerifyConfirmIn(BaseModel):
+    token: str

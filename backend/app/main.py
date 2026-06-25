@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, files, pads, ws
 from app.api.ws import server as crdt_server
 from app.core.config import get_settings
-from app.services import storage
+from app.services import ratelimit, storage
+from app.services.coldstorage import start_scheduler, stop_scheduler
 
 settings = get_settings()
 
@@ -14,8 +15,13 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await storage.ensure_bucket()
-    async with crdt_server:
-        yield
+    await ratelimit.init()
+    start_scheduler()
+    try:
+        async with crdt_server:
+            yield
+    finally:
+        stop_scheduler()
 
 
 app = FastAPI(title="SpacePad", version="0.1.0", lifespan=lifespan)

@@ -126,3 +126,6 @@ Open the same pad URL in two browser windows to see live collaboration.
 | GET | `/api/auth/google/callback` | Google OAuth callback |
 | POST | `/api/pads/{slug}/claim` | Claim an anonymous pad (auth required) |
 | GET | `/health` | Health check |
+
+
+

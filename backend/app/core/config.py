@@ -7,9 +7,22 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     environment: str = "development"
+    # App runtime traffic goes through Supabase's *transaction-mode* pooler
+    # (port 6543) in production — many short-lived REST/WS connections. Keep the
+    # asyncpg driver; pgbouncer transaction mode needs prepared statements off
+    # (see app/db/session.py). Defaults to a local instance for dev.
     database_url: str = "postgresql+asyncpg://spacepad:spacepad@localhost:5432/spacepad"
+    # Migrations run on a *non-transaction-pooled* connection (Supabase's direct
+    # endpoint, or its session-mode pooler on port 5432 where the direct host is
+    # IPv6-only). Alembic needs session-level features that transaction pooling
+    # breaks. Falls back to database_url when unset.
+    database_url_direct: str = ""
     redis_url: str = "redis://localhost:6379/0"
     cors_origins: str = "http://localhost:5173"
+
+    @property
+    def migration_database_url(self) -> str:
+        return self.database_url_direct or self.database_url
 
     # Object storage (S3-compatible; MinIO in local dev). Phase 3.
     s3_endpoint_url: str = "http://localhost:9000"
@@ -24,7 +37,11 @@ class Settings(BaseSettings):
     clamav_port: int = 3310
     clamav_enabled: bool = False
 
-    # Auth (Phase 4).
+    # Auth (Phase 4 → migrated to Supabase Auth in the Supabase phase).
+    # Supabase Auth (gotrue) is now the identity provider. FastAPI calls its REST
+    # API for signup/login/refresh/reset and verifies the ES256 access tokens it
+    # issues against the project JWKS. The legacy HS256 self-minting path
+    # (jwt_secret) is retained only so the test harness can forge tokens offline.
     jwt_secret: str = "change-me-in-production"
     jwt_access_ttl_seconds: int = 900
     jwt_refresh_ttl_seconds: int = 2592000
@@ -33,9 +50,52 @@ class Settings(BaseSettings):
     # Where the Google callback sends the browser back to after login.
     frontend_base_url: str = "http://localhost:5173"
 
+    # Supabase project. supabase_url like https://<ref>.supabase.co. The anon key
+    # is the public `apikey` header on gotrue calls; the service-role key is used
+    # for admin operations (e.g. confirming users). JWKS verifies user tokens.
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_service_role_key: str = ""
+    supabase_jwt_aud: str = "authenticated"
+
+    @property
+    def supabase_enabled(self) -> bool:
+        return bool(self.supabase_url and self.supabase_anon_key)
+
+    @property
+    def supabase_jwks_url(self) -> str:
+        return f"{self.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+
     @property
     def cookies_secure(self) -> bool:
         return self.environment != "development"
+
+    # Rate limiting (Phase 6). Enforced via Redis when reachable; fails open
+    # otherwise (see app/services/ratelimit.py). Figures from PRD §5.4.
+    rate_limit_enabled: bool = True
+    ip_hash_salt: str = "change-me-in-production"
+    rl_create_per_hour: int = 10
+    rl_create_burst_seconds: int = 5
+    rl_edit_per_min: int = 60
+
+    # Stale-pad cold-storage flagging (Phase 6). Not deletion — a storage-cost
+    # marker for pads untouched for this many days. Default 365 (12 months).
+    cold_storage_after_days: int = 365
+
+    # PIN-protected pads. Unlock is time-boxed (a session window), not permanent
+    # per device and not required every visit. Attempts are strictly rate-limited
+    # (small keyspace) per pad per IP — reuses the Phase 6 token-bucket limiter.
+    pin_unlock_window_seconds: int = 4 * 60 * 60  # 4 hours
+    pin_min_length: int = 4
+    pin_max_length: int = 12
+    rl_pin_attempts_per_window: int = 5
+    rl_pin_window_seconds: int = 300  # 5 attempts / 5 min / (pad, IP)
+
+    # Email delivery (Phase 7). If no provider is configured, transactional
+    # emails are logged instead of sent (see app/services/email.py).
+    email_provider: str = ""  # "" => console/log stub
+    email_from: str = "no-reply@spacepad.app"
+    password_reset_ttl_seconds: int = 3600  # 1 hour, single-use (PRD §5.6)
 
     # Upload caps (Phase 3). Kept here as configurable constants, not magic numbers.
     anon_max_files_per_pad: int = 5

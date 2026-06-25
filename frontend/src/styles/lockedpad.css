@@ -1,0 +1,20 @@
+.wavy-lines path {
+  stroke-dasharray: 15, 5;
+  stroke-dashoffset: 0;
+  animation: wave 3s linear infinite;
+}
+
+@keyframes wave {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -15;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wavy-lines path {
+    animation: none;
+  }
+}
