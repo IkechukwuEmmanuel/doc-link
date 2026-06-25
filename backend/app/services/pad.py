@@ -22,6 +22,36 @@ async def get_pad_by_slug(db: AsyncSession, slug: str) -> Pad | None:
     return result.scalar_one_or_none()
 
 
+async def get_pad_by_owner_and_name(
+    db: AsyncSession, username: str, padname: str
+) -> Pad | None:
+    """Get a pad owned by a user, by the pad's name (slug or custom name).
+    
+    The padname can be either:
+    - The pad's slug (default name, case-insensitive)
+    - The pad's custom name (case-sensitive)
+    """
+    from app.models.user import User
+    
+    # Look up the owner by username
+    owner = await db.execute(
+        select(User).where(User.username == username.lower())
+    )
+    owner_user = owner.scalar_one_or_none()
+    if owner_user is None:
+        return None
+    
+    # Look up the pad by owner_id and padname
+    # Try matching slug first (case-insensitive), then custom name (case-sensitive)
+    result = await db.execute(
+        select(Pad).where(
+            (Pad.owner_id == owner_user.id) &
+            ((Pad.slug == padname) | (Pad.name == padname))
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 async def touch_last_opened(db: AsyncSession, pad: Pad) -> None:
     pad.last_opened_at = func.now()
     await db.commit()
@@ -114,8 +144,17 @@ async def update_pad_metadata(
 
     Only fields explicitly passed (not ``_UNSET``) are applied, so ``name=None``
     clears the custom name while an omitted ``name`` leaves it untouched.
+    
+    When renaming, the old name is added to previous_names for redirect tracking.
     """
-    if name is not _UNSET:
+    if name is not _UNSET and name != pad.name:
+        # Store the old name in previous_names for redirect tracking
+        if pad.name:
+            if isinstance(pad.previous_names, list):
+                if pad.name not in pad.previous_names:
+                    pad.previous_names.append(pad.name)
+            else:
+                pad.previous_names = [pad.name]
         pad.name = name
     if visibility is not _UNSET and visibility is not None:
         pad.visibility = visibility

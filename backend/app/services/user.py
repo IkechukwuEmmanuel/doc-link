@@ -10,10 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from app.services import auth as auth_service
+from app.services import username as username_service
 
 
 class EmailTakenError(Exception):
     """Raised when an email is already registered."""
+
+
+class UsernameTakenError(Exception):
+    """Raised when a username is already taken."""
 
 
 async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
@@ -27,6 +32,13 @@ async def get_by_email(db: AsyncSession, email: str) -> User | None:
     ).scalar_one_or_none()
 
 
+async def get_by_username(db: AsyncSession, username: str) -> User | None:
+    normalized = username.strip().lower()
+    return (
+        await db.execute(select(User).where(User.username == normalized))
+    ).scalar_one_or_none()
+
+
 async def upsert_profile(
     db: AsyncSession,
     *,
@@ -35,6 +47,7 @@ async def upsert_profile(
     display_name: str | None = None,
     email_verified: bool = False,
     provider: str | None = None,
+    username: str | None = None,
 ) -> User:
     """Create or refresh the ``public.users`` profile mirroring an
     ``auth.users`` row (same UUID). The linkage is matching-UUID
@@ -43,6 +56,14 @@ async def upsert_profile(
     """
     uid = uuid.UUID(str(user_id))
     normalized = email.strip().lower()
+    
+    # Generate a default username if not provided (for OAuth/Supabase sign-ins)
+    if username is None:
+        username = normalized.split("@")[0]
+        # Ensure minimum length of 3 for username
+        if len(username) < 3:
+            username = username + "user"
+    
     user = await get_by_id(db, uid)
     if user is None:
         user = User(
@@ -51,6 +72,7 @@ async def upsert_profile(
             display_name=display_name,
             email_verified=email_verified,
             oauth_provider=provider,
+            username=username,
         )
         db.add(user)
         try:
@@ -123,20 +145,32 @@ async def create_user(
     db: AsyncSession,
     *,
     email: str,
+    username: str,
     password: str,
     display_name: str | None = None,
 ) -> User:
+    # Validate and normalize username
+    try:
+        normalized_username = username_service.validate_username(username)
+    except username_service.UsernameError as e:
+        raise UsernameTakenError(str(e))
+    
     user = User(
         email=email.strip().lower(),
+        username=normalized_username,
         password_hash=auth_service.hash_password(password),
         display_name=display_name,
     )
     db.add(user)
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
-        raise EmailTakenError(email)
+        if "email" in str(e):
+            raise EmailTakenError(email)
+        elif "username" in str(e):
+            raise UsernameTakenError(username)
+        raise
     await db.refresh(user)
     return user
 
@@ -173,12 +207,20 @@ async def upsert_google_user(
             await db.refresh(existing)
         return existing
 
+    # Generate a default username based on email
+    normalized_email = email.strip().lower()
+    username = normalized_email.split("@")[0]
+    # Ensure minimum length of 3 for username
+    if len(username) < 3:
+        username = username + "user"
+    
     user = User(
-        email=email.strip().lower(),
+        email=normalized_email,
         oauth_provider="google",
         oauth_subject=subject,
         email_verified=True,
         display_name=display_name,
+        username=username,
     )
     db.add(user)
     try:

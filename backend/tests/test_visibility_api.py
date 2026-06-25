@@ -7,9 +7,14 @@ from sqlalchemy import select
 from app.models.pad import CollaboratorRole, Pad, PadCollaborator, Visibility
 
 
-async def _signup(client, email):
+async def _signup(client, email, username=None):
+    if username is None:
+        username = email.split("@")[0]
+        # Ensure minimum length of 3 for username
+        if len(username) < 3:
+            username = username + "user"
     resp = await client.post(
-        "/api/auth/signup", json={"email": email, "password": "password123"}
+        "/api/auth/signup", json={"email": email, "password": "password123", "username": username}
     )
     body = resp.json()
     return body["access_token"], uuid.UUID(body["user"]["id"])

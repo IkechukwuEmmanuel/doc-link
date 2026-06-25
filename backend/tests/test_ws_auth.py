@@ -20,7 +20,11 @@ async def wsdb(session_factory, monkeypatch):
 
 async def _make_user(factory, email) -> uuid.UUID:
     async with factory() as db:
-        user = User(email=email, password_hash="x")
+        username = email.split("@")[0]
+        # Ensure minimum length of 3 for username
+        if len(username) < 3:
+            username = username + "user"
+        user = User(email=email, password_hash="x", username=username)
         db.add(user)
         await db.commit()
         return user.id

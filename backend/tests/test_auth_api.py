@@ -1,7 +1,12 @@
-async def _signup(client, email="a@example.com", password="password123", **extra):
+async def _signup(client, email="a@example.com", password="password123", username=None, **extra):
+    if username is None:
+        username = email.split("@")[0]
+        # Ensure minimum length of 3 for username
+        if len(username) < 3:
+            username = username + "user"
     return await client.post(
         "/api/auth/signup",
-        json={"email": email, "password": password, **extra},
+        json={"email": email, "password": password, "username": username, **extra},
     )
 
 
@@ -17,7 +22,7 @@ async def test_signup_returns_access_token_and_sets_cookie(client):
 
 async def test_signup_duplicate_email_conflicts(client):
     await _signup(client)
-    dup = await _signup(client)
+    dup = await _signup(client, username="different")
     assert dup.status_code == 409
 
 

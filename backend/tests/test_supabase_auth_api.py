@@ -47,7 +47,7 @@ class FakeSupabase:
         if name in self.raise_with:
             raise self.raise_with[name]
 
-    async def sign_up(self, *, email, password, display_name):
+    async def sign_up(self, *, email, password, username, display_name):
         self.calls.append(("sign_up", email))
         self._maybe_raise("sign_up")
         return _session(email=email, display_name=display_name)
@@ -101,7 +101,7 @@ def fake_supabase(monkeypatch):
 async def test_supabase_signup_returns_token_and_sets_cookie(client, fake_supabase):
     resp = await client.post(
         "/api/auth/signup",
-        json={"email": "a@example.com", "password": "password123", "display_name": "Ada"},
+        json={"email": "a@example.com", "password": "password123", "username": "testuser", "display_name": "Ada"},
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -118,7 +118,7 @@ async def test_supabase_signup_duplicate_conflicts(client, fake_supabase):
         400, "already registered", code="user_already_exists"
     )
     resp = await client.post(
-        "/api/auth/signup", json={"email": "a@example.com", "password": "password123"}
+        "/api/auth/signup", json={"email": "a@example.com", "password": "password123", "username": "testuser"}
     )
     assert resp.status_code == 409
 
@@ -237,7 +237,7 @@ async def test_supabase_verify_email_request_resends(client, fake_supabase, sess
     from app.models.user import User
 
     async with session_factory() as db:
-        user = User(id=uuid.UUID(USER_ID), email="a@example.com", email_verified=False)
+        user = User(id=uuid.UUID(USER_ID), email="a@example.com", email_verified=False, username="testuser")
         db.add(user)
         await db.commit()
     token = auth_service.create_access_token(uuid.UUID(USER_ID))

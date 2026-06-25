@@ -92,7 +92,7 @@ class SupabaseAuthClient:
 
     # --- public (anon-key) flows ------------------------------------------- #
     async def sign_up(
-        self, *, email: str, password: str, display_name: str | None
+        self, *, email: str, password: str, username: str, display_name: str | None
     ) -> dict:
         """Create a user. Returns the gotrue body; if email confirmation is
         disabled it includes a ``session`` (access/refresh tokens), otherwise the
@@ -102,7 +102,10 @@ class SupabaseAuthClient:
             json={
                 "email": email,
                 "password": password,
-                "data": {"display_name": display_name} if display_name else {},
+                "data": {
+                    "username": username,
+                    "display_name": display_name
+                } if (username or display_name) else {},
             },
             headers=self._headers(),
         )

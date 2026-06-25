@@ -139,7 +139,7 @@ async def signup(body: SignupIn, response: Response, db: AsyncSession = Depends(
     if supabase_auth.client is not None:
         try:
             gotrue = await supabase_auth.client.sign_up(
-                email=body.email, password=body.password, display_name=body.display_name
+                email=body.email, password=body.password, username=body.username, display_name=body.display_name
             )
         except SupabaseAuthError as err:
             raise _supabase_http_error(err)
@@ -147,11 +147,15 @@ async def signup(body: SignupIn, response: Response, db: AsyncSession = Depends(
 
     try:
         user = await user_service.create_user(
-            db, email=body.email, password=body.password, display_name=body.display_name
+            db, email=body.email, username=body.username, password=body.password, display_name=body.display_name
         )
     except user_service.EmailTakenError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="That email is already registered."
+        )
+    except user_service.UsernameTakenError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="That username is already taken."
         )
     return _legacy_payload(response, user)
 

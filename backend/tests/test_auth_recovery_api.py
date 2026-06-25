@@ -28,9 +28,14 @@ def _token_from(body: str) -> str:
     return body.split("token=")[1].split()[0].strip()
 
 
-async def _signup(client, email="a@example.com", password="password123"):
+async def _signup(client, email="a@example.com", password="password123", username=None):
+    if username is None:
+        username = email.split("@")[0]
+        # Ensure minimum length of 3 for username
+        if len(username) < 3:
+            username = username + "user"
     return await client.post(
-        "/api/auth/signup", json={"email": email, "password": password}
+        "/api/auth/signup", json={"email": email, "password": password, "username": username}
     )
 
 

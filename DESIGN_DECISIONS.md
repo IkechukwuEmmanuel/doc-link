@@ -195,3 +195,25 @@ screens) to the design system. The editor is still a plain `<textarea>`; the
 WYSIWYG-markdown Tiptap surface, remote cursors, presence, drag-drop upload UI, login/
 signup, and dashboard are built in their respective PRD phases on top of these tokens
 and components.
+
+## URL scheme & usernames
+- **Usernames in top-level namespace:** Usernames are case-insensitive (stored normalized)
+  but displayed as entered. They occupy the same top-level URL space as pads and reserved
+  routes, sharing the reserved-word list to prevent routing conflicts (e.g. a username of
+  `new` would be ambiguous with the creation route).
+- **Three address formats coexist:**
+  - `/{slug}` for anonymous pads (existing, unchanged behavior).
+  - `/{username}/{padname}` for owned pads, where padname is the slug or custom name.
+  - `/new` (global), `/{username}/new`, `/{username}/new/{custom-name}` for creation.
+    The `/new` catch-all is routed at the frontend (any URL ending in `/new` is treated
+    as a creation request); the backend does not special-case it.
+- **Claiming and renaming redirect:** When an anonymous pad is claimed (gains an owner),
+  accessing the old `/{slug}` returns a 301 redirect to `/{username}/{slug}`. Similarly,
+  when an owned pad is renamed, the old `/{username}/{old-name}` address redirects to the
+  new one. This preserves existing links and bookmarks across ownership and name changes.
+- **Rename changes the address (design pivot):** The original Phase-5 dashboard spec treated
+  custom names as display-only, not affecting the underlying pad address. The new URL scheme
+  makes custom names **the actual address**, so renaming now changes the pad's URL. This is
+  intentional, and redirects ensure old links don't break. Documented as a deliberate
+  decision change in `DECISIONS.md`.
+

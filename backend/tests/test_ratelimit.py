@@ -38,7 +38,7 @@ async def test_creation_burst_guard_returns_429(client, inmem_limiter):
 
 async def test_authenticated_create_not_rate_limited(client, inmem_limiter):
     signup = await client.post(
-        "/api/auth/signup", json={"email": "a@example.com", "password": "password123"}
+        "/api/auth/signup", json={"email": "a@example.com", "password": "password123", "username": "testuser"}
     )
     token = signup.json()["access_token"]
     auth = {"Authorization": f"Bearer {token}"}

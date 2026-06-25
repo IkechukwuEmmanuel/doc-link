@@ -1,6 +1,8 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_optional_user
@@ -23,6 +25,7 @@ from app.services import pad as pad_service
 from app.services import pin as pin_service
 from app.services import ratelimit as ratelimit_service
 from app.services import slug as slug_service
+from app.services import user as user_service
 
 router = APIRouter(prefix="/api/pads", tags=["pads"])
 
@@ -115,7 +118,72 @@ async def create_pad(
     return await _pad_out(db, pad, user)
 
 
-@router.get("/{slug}", response_model=PadOut)
+@router.get("/{username}/{padname}")
+async def get_owned_pad(
+    username: str,
+    padname: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
+    """Fetch a pad owned by a user, by username and padname.
+    
+    The padname can be either the slug or a custom name. If the padname is a
+    previous custom name (the pad was renamed), redirect to the current name.
+    """
+    from app.models.user import User as UserModel
+    
+    # Look up the owner by username
+    owner = await db.execute(
+        select(UserModel).where(UserModel.username == username.lower())
+    )
+    owner_user = owner.scalar_one_or_none()
+    if owner_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "User not found.", "creatable": False},
+        )
+    
+    # Look up the pad by owner_id and padname
+    from sqlalchemy import or_
+    result = await db.execute(
+        select(Pad).where(
+            (Pad.owner_id == owner_user.id) &
+            ((Pad.slug == padname) | (Pad.name == padname))
+        )
+    )
+    pad = result.scalar_one_or_none()
+    
+    if pad is None:
+        # Check if the padname is a previous name; if so, redirect to the current name
+        result = await db.execute(
+            select(Pad).where(
+                (Pad.owner_id == owner_user.id) &
+                (Pad.previous_names.contains([padname]))
+            )
+        )
+        pad = result.scalar_one_or_none()
+        if pad:
+            # Redirect to the current pad name
+            new_url = f"/api/pads/{username}/{pad.name or pad.slug}"
+            return RedirectResponse(url=new_url, status_code=status.HTTP_301_MOVED_PERMANENTLY)
+        
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "This pad doesn't exist yet.", "creatable": False},
+        )
+    
+    if not await access_service.can_read(db, pad, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This pad is private. Ask the owner to share it with you.",
+        )
+    await pad_service.touch_last_opened(db, pad)
+    unlock_token = request.cookies.get(pin_service.UNLOCK_COOKIE)
+    return await _pad_out(db, pad, user, unlock_token)
+
+
+@router.get("/{slug}")
 async def get_pad(
     slug: str,
     request: Request,
@@ -127,6 +195,8 @@ async def get_pad(
     Private pads are 403 to anyone who is not the owner or a collaborator. A
     PIN-protected pad returns 200 with ``locked: true`` and no content until the
     requester presents a valid unlock token (the existence is never hidden).
+    
+    If the pad has been claimed (has an owner), redirect to /{username}/{slug}.
     """
     pad = await pad_service.get_pad_by_slug(db, slug)
     if pad is None:
@@ -139,12 +209,22 @@ async def get_pad(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"message": "This pad doesn't exist yet.", "creatable": creatable},
         )
+    
+    # Check visibility first, before redirect
     if not await access_service.can_read(db, pad, user):
         # 403 (not 404): a private pad is "unlisted", its existence isn't secret.
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This pad is private. Ask the owner to share it with you.",
         )
+    
+    # If the pad has an owner, redirect to the new address
+    if pad.owner_id is not None:
+        owner = await user_service.get_by_id(db, pad.owner_id)
+        if owner:
+            new_url = f"/api/pads/{owner.username}/{pad.name or pad.slug}"
+            return RedirectResponse(url=new_url, status_code=status.HTTP_301_MOVED_PERMANENTLY)
+    
     await pad_service.touch_last_opened(db, pad)
     unlock_token = request.cookies.get(pin_service.UNLOCK_COOKIE)
     return await _pad_out(db, pad, user, unlock_token)

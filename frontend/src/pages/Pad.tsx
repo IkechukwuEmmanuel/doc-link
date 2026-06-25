@@ -14,11 +14,14 @@ import { useTheme } from "../useTheme";
 type Status = "loading" | "missing" | "invalid" | "ready" | "error" | "forbidden";
 
 export default function Pad() {
-  const { slug = "" } = useParams();
+  const { username, padname, slug = "" } = useParams();
   const location = useLocation();
   const seed = (location.state as { seed?: string } | null)?.seed ?? "";
   const { theme, toggle } = useTheme();
   const { user, authedFetch } = useAuth();
+
+  // Determine the pad identifier: if username/padname exist, use padname; otherwise use slug
+  const padIdentifier = padname || slug;
 
   const [status, setStatus] = useState<Status>("loading");
   const [errorMsg, setErrorMsg] = useState("");
@@ -30,7 +33,7 @@ export default function Pad() {
   useEffect(() => {
     let cancelled = false;
     setStatus("loading");
-    getPad(slug, authedFetch)
+    getPad(padIdentifier, authedFetch)
       .then((res) => {
         if (cancelled) return;
         if (res.kind === "found") {
@@ -52,10 +55,10 @@ export default function Pad() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, authedFetch]);
+  }, [padIdentifier, authedFetch]);
 
   async function claim() {
-    const resp = await authedFetch(`/api/pads/${encodeURIComponent(slug)}/claim`, {
+    const resp = await authedFetch(`/api/pads/${encodeURIComponent(padIdentifier)}/claim`, {
       method: "POST",
     });
     if (resp.ok) {
@@ -66,8 +69,8 @@ export default function Pad() {
 
   async function createHere() {
     try {
-      await createPad(slug, authedFetch);
-      const res = await getPad(slug, authedFetch);
+      await createPad(padIdentifier, authedFetch);
+      const res = await getPad(padIdentifier, authedFetch);
       if (res.kind === "found") {
         setPad(res.pad);
         setOwnerId(res.pad.owner_id);
@@ -84,7 +87,7 @@ export default function Pad() {
   if (status === "invalid")
     return (
       <div className="pad-state">
-        <p>"{slug}" isn't a valid pad name.</p>
+        <p>"{padIdentifier}" isn't a valid pad name.</p>
         <Link className="text-link" to="/">
           Go home
         </Link>
@@ -120,7 +123,7 @@ export default function Pad() {
         <p>This pad doesn't exist yet — create it?</p>
         <div className="pad-state-actions">
           <button className="btn btn-primary" onClick={createHere}>
-            Create /{slug}
+            Create /{padIdentifier}
           </button>
           <Link className="text-link" to="/">
             Cancel
@@ -134,7 +137,7 @@ export default function Pad() {
   if (pad?.locked)
     return (
       <LockedPad
-        slug={slug}
+        slug={padIdentifier}
         pinFormat={pad.pin_format}
         onUnlocked={(unlocked) => {
           setPad(unlocked);
@@ -148,7 +151,7 @@ export default function Pad() {
   return (
     <div className="pad">
       <TopBar
-        slug={slug}
+        slug={padIdentifier}
         peers={peers}
         connection={canEdit ? connection : "noaccess"}
         theme={theme}
@@ -161,7 +164,7 @@ export default function Pad() {
           <div className="pad-canvas">
             {canEdit ? (
               <CollabEditor
-                slug={slug}
+                slug={padIdentifier}
                 seed={seed}
                 onPeersChange={setPeers}
                 onConnectionChange={setConnection}
@@ -173,7 +176,7 @@ export default function Pad() {
             )}
           </div>
           <aside className="pad-file-side">
-            <FileTray slug={slug} />
+            <FileTray slug={padIdentifier} />
           </aside>
         </div>
       </div>

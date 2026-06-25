@@ -14,9 +14,14 @@ from app.services import ratelimit
 from app.services.ratelimit import InMemoryBackend
 
 
-async def _signup(client, email):
+async def _signup(client, email, username=None):
+    if username is None:
+        username = email.split("@")[0]
+        # Ensure minimum length of 3 for username
+        if len(username) < 3:
+            username = username + "user"
     resp = await client.post(
-        "/api/auth/signup", json={"email": email, "password": "password123"}
+        "/api/auth/signup", json={"email": email, "password": "password123", "username": username}
     )
     body = resp.json()
     return body["access_token"], uuid.UUID(body["user"]["id"])
@@ -217,7 +222,7 @@ async def test_ws_pin_pad_allows_owner_without_unlock(wsdb):
     async with wsdb() as db:
         from app.models.user import User
 
-        db.add(User(id=owner_id, email="o@example.com", password_hash="x"))
+        db.add(User(id=owner_id, email="o@example.com", password_hash="x", username="owner"))
         await db.commit()
     await _make_pad_row(
         wsdb, "ws-pin-03", owner_id=owner_id, pin_protected=True,

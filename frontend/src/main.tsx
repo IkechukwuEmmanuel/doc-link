@@ -21,7 +21,10 @@ const router = createBrowserRouter([
   { path: "/reset-password", element: <ResetPassword /> },
   { path: "/verify-email", element: <VerifyEmail /> },
   { path: "/account/pads", element: <AccountPads /> },
-    { path: "/new", element: <NewPad /> },
+  { path: "/new", element: <NewPad /> },
+  { path: "/:username/new", element: <NewPad /> },
+  { path: "/:username/new/:customName", element: <NewPad /> },
+  { path: "/:username/:padname", element: <Pad /> },
   { path: "/:slug", element: <Pad /> },
 ]);
 

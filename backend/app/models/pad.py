@@ -14,7 +14,7 @@ from sqlalchemy import (
     text,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin
@@ -52,6 +52,10 @@ class Pad(Base, TimestampMixin):
         nullable=False,
     )
     name: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    # Track previous custom names for redirects when a pad is renamed
+    previous_names: Mapped[list[str]] = mapped_column(
+        JSON, default=list, nullable=False, server_default=text("'[]'")
+    )
     is_archived: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, server_default=text('false')
     )

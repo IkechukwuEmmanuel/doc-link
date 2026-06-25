@@ -430,3 +430,51 @@ end-to-end coverage; flagged so test/prod divergence is acknowledged, not silent
 - **WS parity.** The WebSocket handshake performs the same unlock-token check (close code
   `4401`) before any CRDT state is exchanged, exactly as the visibility gate does for
   private pads.
+
+### URL Scheme & Usernames (New)
+- **Usernames added to User model:** A unique, case-insensitive `username` field (3–40 chars,
+  alphanumeric + hyphens/underscores, start/end alphanumeric). Usernames are chosen at signup,
+  stored normalized (lowercase), and use the same reserved-word exclusion list as pad slugs
+  (e.g. `login`, `new`, `admin`, etc.) to avoid routing ambiguity. A new Alembic migration
+  adds the column with a DB-level uniqueness constraint.
+- **Username validation reuses slug logic:** A new `app/services/username.py` module validates
+  and normalizes usernames using the same rules as custom pads slugs, inheriting the
+  `RESERVED_SLUGS` list from `app/services/slug.py` to ensure usernames and pad addresses
+  never collide at the top-level URL namespace.
+- **Signup schema updated:** `SignupIn` now requires a `username` field (validated via the
+  new username service). The schema is also updated for Supabase auth, which stores the
+  username in the user's `data` metadata field.
+- **Three coexisting URL formats:**
+  - `/{slug}` resolves anonymous (unowned) pads unchanged.
+  - `/{username}/{padname}` resolves owned pads, where padname is either the slug or a
+    custom name.
+  - `/new` (global), `/{username}/new`, and `/{username}/new/{custom-name}` are creation routes.
+    The frontend routes handle the catch-all `/new` pattern by treating any trailing `/new`
+    as a pad-creation trigger; the backend does not need special routing for this (the frontend
+    navigates directly to `/new`).
+- **Claiming changes a pad's address (301 redirect):** When an anonymous pad is claimed, its
+  canonical address becomes `/{username}/{slug}`. The old `/{slug}` address returns a 301
+  redirect to the new one, implemented in the `GET /{slug}` endpoint by detecting `owner_id`
+  and redirecting if present. This ensures existing bookmarks don't break.
+- **Renaming changes a pad's address with redirect tracking:** When an owned pad is renamed,
+  the old custom name is appended to a new `previous_names` JSON array on the Pad model.
+  The `GET /{username}/{padname}` endpoint checks if the accessed padname is in
+  `previous_names` and 301-redirects to the current name if found. This aligns with the
+  new requirement that renaming **changes** the address (reversing the original dashboard
+  spec's "renaming doesn't change the address" behavior — a deliberate design decision change,
+  see below).
+- **Pad model extended:** A new `previous_names: JSON[]` column tracks old custom names for
+  redirects. On rename, `update_pad_metadata` appends the old name to this list.
+- **New API endpoints:**
+  - `GET /api/pads/{username}/{padname}` resolves owned pads with redirect support for renames
+    and detects whether a username exists (404 response detail includes `creatable: false`
+    if the owner doesn't exist, so the frontend doesn't offer to create a pad under a
+    non-existent user).
+  - `GET /api/pads/{slug}` remains unchanged but now checks for and redirects claimed pads.
+- **Design decision: renaming now changes the address.** The original dashboard spec (Phase 5)
+  explicitly described renaming as a display-only change that doesn't affect the underlying
+  slug/address. The new URL scheme makes a pad's custom name **its actual address**, so
+  renaming necessarily changes the address. This is a deliberate pivot from the original spec,
+  not an oversight. The redirect logic ensures old links continue to work, and tests verify
+  the redirect behavior.
+
