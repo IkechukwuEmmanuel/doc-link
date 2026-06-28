@@ -28,8 +28,8 @@ explicitly-deferred ops actions before serving real traffic.
 - **Frontend**: React + TypeScript + Vite, CodeMirror 6
 - **Real-time**: Yjs CRDT over a y-websocket-compatible server (`pycrdt` /
   `pycrdt-websocket`) hosted in-process by FastAPI
-- **Storage**: S3-compatible object storage (MinIO locally) via `aioboto3`
-- **Infra**: Docker Compose (Postgres, Redis, MinIO; optional ClamAV)
+- **Storage**: Supabase Storage (private bucket) via its REST API
+- **Infra**: Docker Compose (Postgres, Redis; optional ClamAV)
 
 ## How real-time works (Phase 2)
 
@@ -49,7 +49,7 @@ explicitly-deferred ops actions before serving real traffic.
 
 - Files are **proxied through the backend**: the browser POSTs to
   `POST /api/pads/{slug}/files`, which enforces per-pad quotas (count / per-file /
-  total bytes), stores the bytes in MinIO, scans them, and persists the result.
+  total bytes), stores the bytes in Supabase Storage, scans them, and persists the result.
 - **Malware scanning fails closed.** A file is only ever served once its
   `scan_status` is `clean`. If the scanner is disabled or unreachable, the upload is
   marked `failed`, its bytes are deleted from storage, and downloads return 409.

@@ -14,7 +14,6 @@ dependencies = [
     "python-dotenv>=1.0",
     "pycrdt>=0.12",
     "pycrdt-websocket>=0.16",
-    "aioboto3>=13",
     "python-multipart>=0.0.18",
     "clamd>=1.0",
     "pyjwt[crypto]>=2.9",

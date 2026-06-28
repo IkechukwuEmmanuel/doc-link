@@ -607,3 +607,37 @@ effort. Running status lives in `PRODUCTION_READINESS.md`. Judgment calls below.
   noted as accepted tech debt — the production path is Supabase PKCE (S256), which is fine.
   Remaining httpx `cookies=` test deprecation also accepted (test-only).
 
+## 2026-06-28 — File storage moved to Supabase Storage (REVERSES the Supabase-migration carve-out)
+
+- **Reverses** the explicit decision logged above in the Supabase-migration section
+  ("What deliberately did NOT change … File storage/scanning (`aioboto3` + `clamd`) is **not**
+  moving to Supabase Storage in this phase"). The *scanning* half is unchanged; only the
+  physical byte store moves.
+- **Why now:** the project is already on Supabase for database and auth, and we don't want a
+  second storage provider (MinIO/S3) to provision, secure, and operate. Consolidating onto
+  Supabase Storage removes the `S3_*` credentials/endpoint surface entirely.
+- **How:** `app/services/storage.py` is re-implemented as a thin httpx wrapper over the
+  Supabase Storage REST API (same pattern as `supabase_auth.py`), authenticating with the
+  service-role key. The **public interface is unchanged** (`ensure_bucket` / `put_object` /
+  `get_object` / `delete_object`), so file routes, access control, cap enforcement, and the
+  malware-scan flow are untouched — this is a swap behind the interface, not a rewrite.
+- **Bucket:** a **private** bucket `pad-files` (created via migration in `storage.buckets`,
+  `public=false`). Access still goes through FastAPI's own permission checks (the bucket is
+  never served via a public URL); the service-role key bypasses storage RLS so authorization
+  remains entirely in the app layer — consistent with the H3 "all access control in FastAPI"
+  decision.
+- **Config:** removed `S3_ENDPOINT_URL/REGION/ACCESS_KEY/SECRET_KEY/BUCKET`; added
+  `SUPABASE_STORAGE_BUCKET` (default `pad-files`), reusing the existing `SUPABASE_URL` /
+  `SUPABASE_SERVICE_ROLE_KEY`. Dropped the now-unused `aioboto3` dependency and the MinIO
+  service/volume from `docker-compose.yml`.
+- **Tests:** the `fake_storage_and_scan` fixture monkeypatches the storage module's functions,
+  so it substitutes for real calls regardless of the backend (no MinIO and no live Supabase
+  needed in tests; nothing skipped). Added `tests/test_storage.py` for the not-found handling.
+  Full suite: 135 passed.
+- **Live verification (done):** ran a real put→get(verify bytes)→delete→confirm-gone→idempotent-
+  re-delete round-trip against the live `pad-files` bucket with the service-role key — all steps
+  passed. This surfaced a real quirk now handled: Supabase's single-object `DELETE` returns HTTP
+  **400** with `{"statusCode":"404","error":"not_found"}` in the body (not an HTTP 404) for a
+  missing object, so `delete_object` treats that body shape as 'already gone' to keep deletion
+  idempotent (matching the old S3 behavior callers rely on).
+

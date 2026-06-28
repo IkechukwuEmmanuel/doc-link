@@ -104,7 +104,8 @@
       "Bash(pkill -f \"uvicorn app.main:app\")",
       "Bash(docker image *)",
       "Bash(kill 125838)",
-      "Bash(kill -9 125838)"
+      "Bash(kill -9 125838)",
+      "Bash(getent hosts *)"
     ]
   },
   "enabledMcpjsonServers": [

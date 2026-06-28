@@ -24,12 +24,10 @@ class Settings(BaseSettings):
     def migration_database_url(self) -> str:
         return self.database_url_direct or self.database_url
 
-    # Object storage (S3-compatible; MinIO in local dev). Phase 3.
-    s3_endpoint_url: str = "http://localhost:9000"
-    s3_region: str = "us-east-1"
-    s3_access_key: str = "spacepad"
-    s3_secret_key: str = "spacepadsecret"
-    s3_bucket: str = "spacepad-uploads"
+    # Object storage: Supabase Storage (Phase 3, re-platformed onto Supabase).
+    # Private bucket; access goes through the FastAPI permission layer using the
+    # service-role key (reuses supabase_url / supabase_service_role_key below).
+    supabase_storage_bucket: str = "pad-files"
 
     # Malware scanning (Phase 3). If clamd is unreachable, scanning fails CLOSED:
     # uploads are marked failed and never served. See DECISIONS.md.

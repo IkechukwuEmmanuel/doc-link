@@ -117,7 +117,7 @@ exist in the repo; the equivalent decisions live in `DECISIONS.md` (§"URL Schem
   --proxy-headers`, container HEALTHCHECK → `/health/ready`) and `frontend/Dockerfile` (Vite
   build → nginx serving static `dist` with SPA fallback + `/api` WebSocket-aware reverse proxy
   via `nginx.conf.template`). Verified locally: backend image built, ran against compose
-  Postgres/Redis/MinIO → `/health`=200, `/health/ready`=200 `{database:ok}`; frontend image
+  Postgres/Redis → `/health`=200, `/health/ready`=200 `{database:ok}`; frontend image
   built, `/`=200 and SPA fallback `/alice/notes`=200 serving `<title>SpacePad</title>`.
   **Constraint (documented in the Dockerfile):** CRDT rooms are in-memory per process → single
   worker only; scaling out needs a shared Y store / sticky routing first.
@@ -141,7 +141,8 @@ exist in the repo; the equivalent decisions live in `DECISIONS.md` (§"URL Schem
   `.gitignore` excludes `.env`, and there is no `.env` committed in the repo (verified — none in
   the working tree or history of this branch). **Required before launch, in the hosting platform's
   secret store (verify directly there — not confirmable from the repo):** rotate `JWT_SECRET`,
-  `IP_HASH_SALT` off `change-me`; set real `SUPABASE_*`, `S3_*`, SMTP creds; `ENVIRONMENT` ≠
+  `IP_HASH_SALT` off `change-me`; set real `SUPABASE_*` (incl. `SUPABASE_SERVICE_ROLE_KEY`,
+  now also used by Supabase Storage), `SUPABASE_STORAGE_BUCKET`, SMTP creds; `ENVIRONMENT` ≠
   `development`; `DATABASE_URL` = transaction-mode pooler (6543) for app traffic and
   `DATABASE_URL_DIRECT` = direct/session connection (5432) for migrations only (rule re-verified
   in code via `migration_database_url`). Deferred items are the live secret values themselves.
@@ -197,3 +198,8 @@ exist in the repo; the equivalent decisions live in `DECISIONS.md` (§"URL Schem
 4. Confirm Supabase automatic backups + PITR retention (B6).
 5. Wire an error-tracking service (Sentry or equivalent) (B5).
 6. Run a staged, production-like load test before relying on PRD §7 capacity (B7).
+7. ~~Smoke-test a real file round-trip against Supabase Storage~~ **DONE (2026-06-28):** a live
+   put→get(verify)→delete→confirm-gone→idempotent-re-delete round-trip against the private
+   `pad-files` bucket passed all steps (run with the service-role key, which was not persisted).
+   Fixed a Supabase delete quirk in the process (HTTP 400 + `statusCode:"404"` body on missing
+   object → treated as already-gone). Re-confirm in the actual production project at deploy.
