@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import BrandWordmark from "./BrandWordmark";
 import ConnectionIndicator, { ConnectionState } from "./ConnectionIndicator";
 import CopyButton from "./CopyButton";
 import PresenceStack, { PresencePeer } from "./PresenceStack";
@@ -79,8 +80,8 @@ export default function TopBar({
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <Link to="/" className="brand-mark" aria-label="SpacePad home">
-          ✦
+        <Link to="/" className="brand-mark" aria-label="River home">
+          <BrandWordmark />
         </Link>
         <CopyButton value={fullUrl} label={slug} ariaLabel={`Copy pad URL ${slug}`} />
       </div>

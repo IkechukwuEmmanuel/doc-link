@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import BrandWordmark from "../components/BrandWordmark";
 import ThemeToggle from "../components/ThemeToggle";
 import {
   PadListItem,
@@ -151,8 +152,8 @@ export default function AccountPads() {
     <main className="dash">
       <header className="dash-header">
         <div className="dash-header-left">
-          <Link to="/" className="brand-mark" aria-label="SpacePad home">
-            ✦
+          <Link to="/" className="brand-mark" aria-label="River home">
+            <BrandWordmark />
           </Link>
           <h1 className="dash-title">My Pads</h1>
         </div>

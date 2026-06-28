@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 172 76" role="img" aria-label="River">
+  <title>River</title>
+  <!-- Wordmark: product name set in the --font-serif stack (system Georgia),
+       regular weight, slight tracking, single walnut-ink color (--text-primary,
+       light). Concrete fill so the file is self-contained for favicon/social/print.
+       For in-app use against either theme, render with fill="currentColor" instead. -->
+  <text x="8" y="54"
+        font-family="Georgia, 'Source Serif 4', 'Lora', 'Times New Roman', serif"
+        font-size="60" font-weight="400" letter-spacing="0.9"
+        fill="#34302c">River</text>
+</svg>
