@@ -90,7 +90,21 @@
       "mcp__supabase__list_migrations",
       "mcp__supabase__list_tables",
       "Bash(python -m alembic branches)",
-      "mcp__supabase__get_advisors"
+      "mcp__supabase__get_advisors",
+      "Read(//tmp/**)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(ls .venv/bin/python)",
+      "Bash(which pytest *)",
+      "mcp__supabase__apply_migration",
+      "Bash(docker version *)",
+      "Bash(docker build *)",
+      "Bash(docker run *)",
+      "Bash(docker rm *)",
+      "Bash(docker compose *)",
+      "Bash(pkill -f \"uvicorn app.main:app\")",
+      "Bash(docker image *)",
+      "Bash(kill 125838)",
+      "Bash(kill -9 125838)"
     ]
   },
   "enabledMcpjsonServers": [

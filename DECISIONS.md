@@ -478,3 +478,132 @@ end-to-end coverage; flagged so test/prod divergence is acknowledged, not silent
   not an oversight. The redirect logic ensures old links continue to work, and tests verify
   the redirect behavior.
 
+## 2026-06-28 — Production-readiness pass (audit fixes + deployment)
+
+Driven by `AUDIT.md` (5 blockers + highs/mediums/lows) and a broader deployment-readiness
+effort. Running status lives in `PRODUCTION_READINESS.md`. Judgment calls below.
+
+### B4 — REST API no longer 301-redirects owned pads (SUPERSEDES the prior "301 redirect" decision)
+- The "URL Scheme & Usernames" section above made `GET /api/pads/{slug}` issue a `301` to
+  `/api/pads/{username}/{padname}` for any owned pad, and `GET /{username}/{padname}` issue a
+  `301` on rename. **That is reversed at the API layer.** Both endpoints now return the pad
+  body directly (`200`).
+- **Why:** the redirect broke shipped behavior — (1) many API consumers (incl. the test
+  client) don't auto-follow redirects, so owner/collaborator fetches `assert 200` failed; and
+  (2) the PIN unlock cookie is path-scoped to `/api/pads/{slug}`, so it was never sent to the
+  `/{username}/...` redirect target → PIN unlock "forgot" immediately.
+- **Replacement:** browser-URL canonicalization is now a **frontend** concern. The `200`
+  response carries a `canonical_url` field (`/{username}/{padname}`, or the current name when
+  reached via a `previous_names` entry); the SPA updates the address bar itself. Content
+  fetches (REST, WS auth, PIN unlock) never depend on an HTTP redirect. The browser-facing URL
+  scheme (`/{slug}`, `/{username}/{padname}`, `/new` family) is unchanged.
+
+### B3 — owned-pad route namespaced to `/u/{username}/{padname}` (departure from "pure reorder")
+- The two-path-param route was registered before the literal `/{slug}/raw`,
+  `/{slug}/collaborators`, `/{slug}/files`, … routes and, because Starlette matches in
+  declaration order, shadowed them (a two-segment GET was always captured by username/padname).
+- The audit's first-choice fix is to declare literal routes first. I did that **and** moved the
+  route under `/u/`. **Why depart from pure reorder:** `raw`/`new` are reserved slugs, but
+  `collaborators`, `files`, `unlock`, `claim` are **not** — a pad's slug or custom name could
+  legitimately be one of them, and a literal sub-route would then swallow
+  `/{username}/<that-name>`. The `/u/` prefix removes the ambiguity entirely. The SPA does not
+  call this REST route directly, and the browser URL scheme is unaffected (served by the SPA).
+
+### B5 — file endpoints reuse the central authz (no parallel logic)
+- All four file routes (`upload`/`list`/`download`/`delete`) now thread the requester through
+  `services/access.py` (`can_read` for list/download, `can_write_content` for upload/delete)
+  **and** `services/pin.py` (`has_pin_access`), mirroring the REST pad-content and WS handlers
+  exactly — closing the IDOR where any slug-knower could read/write/delete attachments on a
+  private or PIN-protected pad. Covered by `tests/test_files_authz.py`.
+
+### M1 / M2 — streaming uploads + auth-tier caps
+- `file.create_file` now streams the upload in 1 MiB chunks and aborts at the per-file /
+  remaining-total cutoff instead of buffering the whole body before the size check.
+- `_caps(user)` branches on authentication: authenticated owners get the `auth_*` caps that
+  were previously dead config; anonymous uploads keep the stricter `anon_*` caps.
+
+### H1 — trusted-proxy client IP (`trusted_proxy_hops`)
+- `ratelimit.client_ip()` no longer trusts the left-most `X-Forwarded-For` value. New setting
+  `TRUSTED_PROXY_HOPS` (default **0** = ignore the header, use the un-spoofable peer IP). With
+  N>0 it reads `parts[-N]` (the entry added by the outermost trusted proxy), ignoring any
+  forged prefix a client tacks on. **Production must set this to the real hop count** (e.g. 1
+  behind a single LB) — this is a hard dependency on the deployment topology (Part B / B3).
+  Covered by `tests/test_client_ip.py`.
+
+### H2 — Supabase profile mirror uses the chosen username; collisions get a suffix
+- `_profile_from_gotrue` now passes `user_metadata.username` (the name chosen at signup, stored
+  in gotrue's `data`) to `upsert_profile` instead of deriving one from the email local-part.
+- On a username collision, `upsert_profile` appends a numeric suffix (`name-2`, `name-3`, …)
+  rather than returning `None` and 500ing via `UserOut.model_validate(None)`. **Chose
+  auto-suffix over surfacing an error** because the signup flow already enforces username
+  uniqueness up front; this path is defensive (e.g. derived-username clashes for OAuth), where
+  silently producing a valid unique handle is the better UX than a hard failure. Email
+  local-parts are sanitized to the allowed charset. Covered by `tests/test_user_profile.py`.
+
+### B6 — email: real SMTP implemented (vendor-neutral); legacy path is the non-Supabase fallback
+- **Reachability:** in the Supabase production deployment, every auth route returns via the
+  gotrue branch (`supabase_auth.client is not None`) before reaching `send_email`, so gotrue
+  sends all transactional mail. The module-level `send_email` is the delivery path for the
+  *legacy* (non-Supabase) flow only — the test harness and any self-hosted deployment without
+  Supabase configured. It is therefore **not dead code**, so it was implemented rather than
+  removed.
+- **Choice:** implemented an SMTP transport (`EMAIL_PROVIDER=smtp`, `EMAIL_SMTP_*`) run via a
+  worker thread. SMTP is vendor-neutral (Postmark/SES/Mailgun all expose it) → no SDK lock-in.
+  The log-stub remains for dev (`EMAIL_PROVIDER=""`). Covered by `tests/test_email_service.py`.
+
+### B1 / B2 — Alembic: merged the two heads, applied to the live DB
+- Created merge revision `340f7a3d4015` joining branch A (`c3d4e5f6a7b8`, pads.name index) and
+  branch B (`g2h3i4j5k6l7` username → `h3i4j5k6l7m8` previous_names). `alembic heads` → one head.
+- **Applied to the live Supabase DB via the Supabase MCP** (no `.env`/direct connection string
+  is present in this environment, so a local `alembic upgrade` would target localhost, not
+  prod). The MCP migration ran exactly the branch-B DDL (add `users.username` + unique index;
+  add `pads.previous_names`) and advanced `alembic_version` to the merge head — identical net
+  effect to `alembic upgrade head`. Confirmed by direct schema inspection.
+- **Backup posture:** the live DB had **0 rows in every table** (verified before the change), so
+  the additive migration carried no data-loss risk; the pre-change state (`alembic_version =
+  c3d4e5f6a7b8`, empty tables) is the recovery point, backed by Supabase PITR. The same graph
+  was independently verified by a full `alembic upgrade head` against throwaway Postgres (also
+  wired into CI).
+
+### H3 — RLS / PostgREST exposure decision
+- **PostgREST (Data API) is reachable** (the advisor reports `rls_auto_enable` callable via
+  `/rest/v1/rpc/...`). However, all `public` tables have **RLS enabled with no policies**, which
+  for the `anon`/`authenticated` PostgREST roles means **deny-all** — so application data is
+  *not* exposed via the Data API. This is the safe default, not the "zero protection" the audit
+  feared: that phrasing applies to RLS-bypassing roles (the app's pooler role), not the exposed
+  anon path. **Decision:** keep RLS deny-all (no permissive policies are written — the app does
+  not use the Data API; all access control lives in the FastAPI layer, per the existing
+  Supabase architecture decision). **Recommended hardening (left to ops):** disable the Data API
+  entirely in project settings, since the app never uses it.
+- **Applied via MCP:** revoked `EXECUTE` on the `SECURITY DEFINER` `public.rls_auto_enable()`
+  from `PUBLIC`/`anon`/`authenticated` (it's an event-trigger helper, never meant to be RPC-
+  callable; the event trigger still fires it internally). Both SECURITY DEFINER advisor WARNs
+  cleared.
+- **Leaked-password protection** (advisor WARN) requires the Supabase Auth dashboard toggle and
+  cannot be set via MCP — flagged as a required pre-launch ops action in `PRODUCTION_READINESS.md`.
+
+### M3 — production env flags
+- `ENVIRONMENT` must be non-`development` so `cookies_secure` sets `Secure` on refresh/PIN/PKCE
+  cookies; `JWT_SECRET`, `IP_HASH_SALT` (and the SMTP/Supabase secrets) must be rotated off the
+  `change-me`/placeholder defaults. This is deployment config, not code — tracked as an explicit
+  ops verification checklist in `PRODUCTION_READINESS.md` (cannot be confirmed from the repo).
+
+### Part B — deployment artifacts
+- **Containerization:** added a multi-stage backend `Dockerfile` (non-root, prod uvicorn,
+  `--proxy-headers`) and a frontend `Dockerfile` (Vite build → nginx, SPA fallback + `/api` WS
+  proxy). Both build and serve (verified locally). **Single-process backend constraint:** CRDT
+  rooms are in-memory per process, so the image runs `--workers 1`; horizontal scaling needs a
+  shared Y store / sticky routing first (documented in the Dockerfile + readiness doc).
+- **CI:** `.github/workflows/ci.yml` runs ruff + pytest + a single-Alembic-head check + frontend
+  build, plus a **migration dry-run against throwaway Postgres** (the check that would have
+  caught the B1/B2 drift automatically).
+- **Observability:** added `/health/ready` (DB-connectivity readiness, 503 on failure) distinct
+  from `/health` (liveness); consistent leveled logging to stdout. Error tracking (Sentry):
+  recommended but deferred — see readiness doc.
+- **Load sanity check:** 100 concurrent CRDT WS handshakes against one dev process → 88 OK,
+  p95 ~1.1 s, `/health` stayed 200 throughout; ~12% timed out under the instantaneous burst.
+  Honest signal that a dedicated load test is needed before the PRD's 10k-connection target.
+- **L4 (tech debt):** the legacy direct-Google-OAuth path still lacks an OAuth `state` param;
+  noted as accepted tech debt — the production path is Supabase PKCE (S256), which is fine.
+  Remaining httpx `cookies=` test deprecation also accepted (test-only).
+

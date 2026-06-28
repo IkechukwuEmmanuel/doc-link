@@ -74,6 +74,14 @@ class Settings(BaseSettings):
     # otherwise (see app/services/ratelimit.py). Figures from PRD §5.4.
     rate_limit_enabled: bool = True
     ip_hash_salt: str = "change-me-in-production"
+    # Number of trusted reverse-proxy hops between the public internet and the
+    # app. The rate-limit client IP is read from the X-Forwarded-For chain
+    # accordingly (the entry added by the outermost trusted proxy). 0 (default)
+    # means trust NO forwarded headers and use the direct peer IP — un-spoofable,
+    # the safe default. Production MUST set this to the real hop count (e.g. 1
+    # behind a single load balancer) or clients can forge X-Forwarded-For to mint
+    # fresh rate-limit buckets (AUDIT H1). See PRODUCTION_READINESS.md topology.
+    trusted_proxy_hops: int = 0
     rl_create_per_hour: int = 10
     rl_create_burst_seconds: int = 5
     rl_edit_per_min: int = 60
@@ -93,9 +101,16 @@ class Settings(BaseSettings):
 
     # Email delivery (Phase 7). If no provider is configured, transactional
     # emails are logged instead of sent (see app/services/email.py).
-    email_provider: str = ""  # "" => console/log stub
+    email_provider: str = ""  # "" => console/log stub; "smtp" => real SMTP send
     email_from: str = "no-reply@spacepad.app"
     password_reset_ttl_seconds: int = 3600  # 1 hour, single-use (PRD §5.6)
+    # SMTP transport (used when EMAIL_PROVIDER=smtp). Vendor-neutral — works with
+    # SES / Postmark / Mailgun via their SMTP endpoints, so no SDK lock-in.
+    email_smtp_host: str = ""
+    email_smtp_port: int = 587
+    email_smtp_username: str = ""
+    email_smtp_password: str = ""
+    email_smtp_starttls: bool = True
 
     # Upload caps (Phase 3). Kept here as configurable constants, not magic numbers.
     anon_max_files_per_pad: int = 5

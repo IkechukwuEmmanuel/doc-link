@@ -159,9 +159,25 @@ def hash_ip(ip: str) -> str:
 
 
 def client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Resolve the client IP for rate-limit keying.
+
+    ``X-Forwarded-For`` is appended left-to-right by each proxy, so the rightmost
+    entries are the ones added by *our* infrastructure and the leftmost are
+    whatever the original client (possibly an attacker) supplied. We trust only
+    the entry added by the outermost of ``trusted_proxy_hops`` proxies — i.e.
+    ``parts[-hops]`` — which ignores any forged prefix a client tacks on. With the
+    default of 0 trusted hops we ignore the header entirely and use the direct
+    peer IP, which cannot be spoofed (AUDIT H1)."""
+    hops = settings.trusted_proxy_hops
+    if hops > 0:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            if len(parts) >= hops:
+                return parts[-hops]
+            # Chain shorter than the configured hop count → it didn't traverse the
+            # expected proxies; fall back to the un-spoofable peer rather than
+            # trusting a too-short (likely forged) header.
     return request.client.host if request.client else "unknown"
 
 

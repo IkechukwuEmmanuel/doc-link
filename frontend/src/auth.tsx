@@ -9,6 +9,7 @@ import {
 
 export interface AuthUser {
   id: string;
+  username: string;
   email: string;
   display_name: string | null;
   email_verified: boolean;

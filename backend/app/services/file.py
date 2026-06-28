@@ -4,24 +4,38 @@ from __future__ import annotations
 
 import uuid
 
+from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.file import File, ScanStatus
 from app.models.pad import Pad
+from app.models.user import User
 from app.services import scan as scan_service
 from app.services import storage
 
 settings = get_settings()
+
+# Stream uploads in chunks so an oversized body is rejected at the cutoff instead
+# of being fully buffered in memory first (AUDIT M1).
+_UPLOAD_CHUNK_BYTES = 1024 * 1024  # 1 MiB
 
 
 class UploadCapError(Exception):
     """Raised when an upload would exceed a pad's quota."""
 
 
-def _caps() -> tuple[int, int, int]:
-    # Anonymous caps for now; auth-tier caps land with Phase 4.
+def _caps(user: User | None) -> tuple[int, int, int]:
+    """Per-tier upload caps. Authenticated owners get the higher auth-tier limits;
+    anonymous uploads get the stricter anon-tier limits (AUDIT M2 — these
+    auth-tier settings were previously dead config)."""
+    if user is not None:
+        return (
+            settings.auth_max_files_per_pad,
+            settings.auth_max_file_bytes,
+            settings.auth_max_total_bytes,
+        )
     return (
         settings.anon_max_files_per_pad,
         settings.anon_max_file_bytes,
@@ -43,24 +57,40 @@ async def get_file(db: AsyncSession, pad: Pad, file_id: uuid.UUID) -> File | Non
     return result.scalar_one_or_none()
 
 
-async def _enforce_caps(db: AsyncSession, pad: Pad, size: int) -> None:
-    max_files, max_file_bytes, max_total_bytes = _caps()
-    if size > max_file_bytes:
-        raise UploadCapError(
-            f"File exceeds the {max_file_bytes} byte per-file limit."
-        )
+async def _current_usage(db: AsyncSession, pad: Pad) -> tuple[int, int]:
+    """(file count, total bytes) already stored against this pad."""
     agg = await db.execute(
         select(func.count(File.id), func.coalesce(func.sum(File.size_bytes), 0)).where(
             File.pad_id == pad.id
         )
     )
     count, total = agg.one()
-    if count + 1 > max_files:
-        raise UploadCapError(f"This pad already has the maximum of {max_files} files.")
-    if total + size > max_total_bytes:
-        raise UploadCapError(
-            f"Upload would exceed the {max_total_bytes} byte total limit for this pad."
-        )
+    return int(count), int(total)
+
+
+async def _read_capped(
+    upload: UploadFile, *, per_file_cap: int, remaining_total: int
+) -> bytes:
+    """Stream the upload in chunks, aborting the moment it would breach either the
+    per-file cap or the pad's remaining total budget — so an oversized body is
+    rejected at the cutoff instead of being fully buffered first (AUDIT M1)."""
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await upload.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > per_file_cap:
+            raise UploadCapError(
+                f"File exceeds the {per_file_cap} byte per-file limit."
+            )
+        if size > remaining_total:
+            raise UploadCapError(
+                "Upload would exceed the total storage limit for this pad."
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def create_file(
@@ -69,14 +99,26 @@ async def create_file(
     *,
     filename: str,
     content_type: str,
-    data: bytes,
+    upload: UploadFile,
+    user: User | None,
 ) -> File:
     """Validate caps, store the bytes, scan, and persist the resulting status.
+
+    Caps are tier-dependent: authenticated owners get the higher auth-tier limits,
+    anonymous uploads the stricter anon-tier ones (AUDIT M2). The body is streamed
+    with an early cutoff rather than fully buffered before the size check (M1).
 
     If the scan does not return clean, the object is deleted from storage and the
     row is kept with ``failed`` status so the file is never served.
     """
-    await _enforce_caps(db, pad, len(data))
+    max_files, max_file_bytes, max_total_bytes = _caps(user)
+    count, total = await _current_usage(db, pad)
+    if count + 1 > max_files:
+        raise UploadCapError(f"This pad already has the maximum of {max_files} files.")
+
+    data = await _read_capped(
+        upload, per_file_cap=max_file_bytes, remaining_total=max_total_bytes - total
+    )
 
     storage_key = f"{pad.id}/{uuid.uuid4()}"
     await storage.put_object(storage_key, data, content_type)

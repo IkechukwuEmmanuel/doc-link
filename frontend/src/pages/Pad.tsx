@@ -14,7 +14,7 @@ import { useTheme } from "../useTheme";
 type Status = "loading" | "missing" | "invalid" | "ready" | "error" | "forbidden";
 
 export default function Pad() {
-  const { username, padname, slug = "" } = useParams();
+  const { padname, slug = "" } = useParams();
   const location = useLocation();
   const seed = (location.state as { seed?: string } | null)?.seed ?? "";
   const { theme, toggle } = useTheme();

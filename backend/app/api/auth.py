@@ -100,6 +100,9 @@ async def _profile_from_gotrue(db: AsyncSession, gotrue_user: dict) -> User:
     meta = gotrue_user.get("user_metadata") or {}
     display_name = meta.get("display_name") or meta.get("full_name") or meta.get("name")
     provider = (gotrue_user.get("app_metadata") or {}).get("provider")
+    # Pass the username the user actually chose at signup (stored in gotrue's
+    # ``data`` → ``user_metadata``) instead of letting upsert_profile derive one
+    # from the email local-part (AUDIT H2).
     return await user_service.upsert_profile(
         db,
         user_id=gotrue_user["id"],
@@ -107,6 +110,7 @@ async def _profile_from_gotrue(db: AsyncSession, gotrue_user: dict) -> User:
         display_name=display_name,
         email_verified=bool(gotrue_user.get("email_confirmed_at")),
         provider=provider,
+        username=meta.get("username"),
     )
 
 

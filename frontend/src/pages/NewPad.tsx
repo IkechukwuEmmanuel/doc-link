@@ -6,7 +6,7 @@ import { useAuth } from "../auth";
 export default function NewPad() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { username, customName } = useParams();
+  const { customName } = useParams();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {

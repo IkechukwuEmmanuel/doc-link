@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 
 from sqlalchemy import select
@@ -39,6 +40,39 @@ async def get_by_username(db: AsyncSession, username: str) -> User | None:
     ).scalar_one_or_none()
 
 
+def _sanitize_username_base(raw: str) -> str:
+    """Coerce an arbitrary string (chosen username or email local-part) into the
+    allowed username charset: lowercase ``[a-z0-9_-]``, starting/ending
+    alphanumeric, no consecutive hyphens, length 3–40."""
+    base = re.sub(r"[^a-z0-9_-]", "-", (raw or "").strip().lower())
+    base = re.sub(r"-{2,}", "-", base).strip("-_")
+    if len(base) < 3:
+        base = (base + "user") if base else "user"
+    return base[:40]
+
+
+async def _unique_username(
+    db: AsyncSession, *, chosen: str | None, email: str, exclude_id: uuid.UUID
+) -> str:
+    """A valid, unique username. Prefer the chosen one (the name the user actually
+    picked at signup); fall back to the email local-part. On collision, append a
+    numeric suffix instead of failing — so a username clash never 500s the mirror
+    (AUDIT H2)."""
+    base = _sanitize_username_base(chosen or email.split("@")[0])
+    candidate = base
+    existing = await get_by_username(db, candidate)
+    if existing is None or existing.id == exclude_id:
+        return candidate
+    for n in range(2, 1000):
+        suffix = f"-{n}"
+        candidate = f"{base[: 40 - len(suffix)]}{suffix}"
+        existing = await get_by_username(db, candidate)
+        if existing is None or existing.id == exclude_id:
+            return candidate
+    # Pathological fallback: a random suffix from the user's own UUID.
+    return f"{base[:31]}-{uuid.UUID(str(exclude_id)).hex[:8]}"
+
+
 async def upsert_profile(
     db: AsyncSession,
     *,
@@ -56,30 +90,44 @@ async def upsert_profile(
     """
     uid = uuid.UUID(str(user_id))
     normalized = email.strip().lower()
-    
-    # Generate a default username if not provided (for OAuth/Supabase sign-ins)
-    if username is None:
-        username = normalized.split("@")[0]
-        # Ensure minimum length of 3 for username
-        if len(username) < 3:
-            username = username + "user"
-    
+
     user = await get_by_id(db, uid)
     if user is None:
+        chosen_username = await _unique_username(
+            db, chosen=username, email=normalized, exclude_id=uid
+        )
         user = User(
             id=uid,
             email=normalized,
             display_name=display_name,
             email_verified=email_verified,
             oauth_provider=provider,
-            username=username,
+            username=chosen_username,
         )
         db.add(user)
         try:
             await db.commit()
         except IntegrityError:
+            # Lost a race (same id or username inserted concurrently). Resolve to
+            # the now-existing row by id; never return None (would 500 the caller).
             await db.rollback()
-            return await get_by_id(db, uid)
+            existing = await get_by_id(db, uid)
+            if existing is not None:
+                return existing
+            # The clash was on username, not id — retry once with a fresh suffix.
+            retry_username = await _unique_username(
+                db, chosen=username, email=normalized, exclude_id=uid
+            )
+            user = User(
+                id=uid,
+                email=normalized,
+                display_name=display_name,
+                email_verified=email_verified,
+                oauth_provider=provider,
+                username=retry_username,
+            )
+            db.add(user)
+            await db.commit()
         await db.refresh(user)
         return user
 

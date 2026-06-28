@@ -1,40 +1,4 @@
-import pytest
-
 from app.models.file import ScanStatus
-from app.services import file as file_service
-from app.services import scan as scan_service
-from app.services import storage
-
-
-@pytest.fixture(autouse=True)
-def fake_storage_and_scan(monkeypatch):
-    """In-memory object store + controllable scan verdict, so tests need no MinIO."""
-    store: dict[str, bytes] = {}
-
-    async def put_object(key, data, content_type):
-        store[key] = data
-
-    async def get_object(key):
-        return store[key]
-
-    async def delete_object(key):
-        store.pop(key, None)
-
-    for mod in (storage,):
-        monkeypatch.setattr(mod, "put_object", put_object)
-        monkeypatch.setattr(mod, "get_object", get_object)
-        monkeypatch.setattr(mod, "delete_object", delete_object)
-    # file_service and api.files reference the same storage module functions
-    # via attribute access, so patching the module is enough.
-
-    verdict = {"status": ScanStatus.clean}
-
-    async def fake_scan(data):
-        return verdict["status"]
-
-    monkeypatch.setattr(scan_service, "scan", fake_scan)
-    monkeypatch.setattr(file_service, "scan_service", scan_service)
-    return {"store": store, "verdict": verdict}
 
 
 async def _make_pad(client, slug="file-pad"):

@@ -217,3 +217,15 @@ and components.
   intentional, and redirects ensure old links don't break. Documented as a deliberate
   decision change in `DECISIONS.md`.
 
+## 2026-06-28 — Canonicalization moves client-side (supersedes the 301-redirect note above)
+- **The REST API no longer 301-redirects owned pads.** The "Claiming and renaming redirect"
+  note above (server-issued 301 from `/{slug}` → `/{username}/{padname}`) is reversed at the
+  API layer because it broke programmatic fetches and the path-scoped PIN unlock cookie (see
+  `AUDIT.md` B4 and the matching dated entry in `DECISIONS.md`).
+- **New UX contract:** fetching a pad returns `200` with a `canonical_url` field in the body
+  (`/{username}/{padname}`, or the *current* name when the pad was opened via an old name).
+  The SPA is responsible for canonicalizing the **address bar** — e.g. `history.replaceState`
+  to `canonical_url` after load — instead of relying on an HTTP redirect. User-visible outcome
+  is the same (old links still resolve and the bar shows the canonical address), but content
+  never round-trips through a redirect, so PIN-unlocked and owner views load correctly.
+

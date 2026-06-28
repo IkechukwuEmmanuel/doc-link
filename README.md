@@ -12,11 +12,15 @@ the rationale behind implementation choices.
 |-------|-------------|-------|
 | 1 | Core pad CRUD + slugs (no real-time, no auth) | ✅ Done |
 | 2 | Real-time collaboration (Yjs/CRDT) | ✅ Done |
-| 3 | File uploads | ✅ Done |
-| 4 | Authentication | ✅ Done |
-| 5 | Authenticated features (incl. dashboard) | ⬜ |
-| 6 | Rate limiting & abuse prevention | ⬜ |
-| 7 | Polish & hardening | ⬜ |
+| 3 | File uploads (cap-enforced, ClamAV scan, cold storage) | ✅ Done |
+| 4 | Authentication (Supabase Auth / gotrue; legacy email+password fallback) | ✅ Done |
+| 5 | Authenticated features: dashboard, visibility, collaborators, PIN pads | ✅ Done |
+| 6 | Rate limiting & abuse prevention | ✅ Done |
+| 7 | Polish & hardening (email scaffolding, security review) | ✅ Done |
+
+**Production readiness:** see `PRODUCTION_READINESS.md` for the full checklist (audit fixes,
+containerization, CI, deployment topology, observability, backups, load) and what remains as
+explicitly-deferred ops actions before serving real traffic.
 
 ## Stack
 
@@ -125,7 +129,11 @@ Open the same pad URL in two browser windows to see live collaboration.
 | GET | `/api/auth/google/login` | Start Google OAuth |
 | GET | `/api/auth/google/callback` | Google OAuth callback |
 | POST | `/api/pads/{slug}/claim` | Claim an anonymous pad (auth required) |
-| GET | `/health` | Health check |
+| GET | `/api/pads/u/{username}/{padname}` | Fetch an owned pad by username + name (returns `canonical_url`) |
+| GET | `/api/pads/{slug}/collaborators` | List collaborators (owner only) |
+| POST | `/api/pads/{slug}/unlock` | Submit a PIN to unlock a PIN-protected pad |
+| GET | `/health` | Liveness check (process up) |
+| GET | `/health/ready` | Readiness check (DB reachable; 503 if not) |
 
 
 
