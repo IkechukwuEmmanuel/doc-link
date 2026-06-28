@@ -9,6 +9,34 @@ interface Props {
   mode: "login" | "signup";
 }
 
+// Mirrors the server rules in app/services/username.py + slug.py RESERVED_SLUGS,
+// so the user gets inline feedback instead of a 422 after submitting.
+const RESERVED_USERNAMES = new Set([
+  "login", "signup", "api", "account", "admin", "static",
+  "assets", "raw", "new", "health", "about",
+]);
+// 3–40 chars, lowercase alphanumeric + hyphens/underscores, start/end
+// alphanumeric, no consecutive hyphens.
+const USERNAME_RE = /^[a-z0-9](?:[a-z0-9_]|-(?!-)){1,38}[a-z0-9]$/;
+
+/** Returns an error message for an invalid username, or null if it's valid. */
+function validateUsername(raw: string): string | null {
+  const u = raw.trim().toLowerCase();
+  if (u.length < 3 || u.length > 40) {
+    return "Username must be between 3 and 40 characters.";
+  }
+  if (u.includes("--")) {
+    return "Username cannot contain consecutive hyphens.";
+  }
+  if (!USERNAME_RE.test(u)) {
+    return "Use lowercase letters, numbers, hyphens, and underscores; start and end with a letter or number.";
+  }
+  if (RESERVED_USERNAMES.has(u)) {
+    return "That username is reserved.";
+  }
+  return null;
+}
+
 export default function AuthPage({ mode }: Props) {
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
@@ -16,19 +44,35 @@ export default function AuthPage({ mode }: Props) {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const isSignup = mode === "signup";
+  // Live username validation (signup only) for inline feedback.
+  const usernameError = isSignup && username ? validateUsername(username) : null;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (isSignup) {
+      const uErr = validateUsername(username);
+      if (uErr) {
+        setError(uErr);
+        return;
+      }
+    }
     setBusy(true);
     try {
       if (isSignup) {
-        await signup(email, password, displayName || undefined);
+        // Server stores usernames normalized (lowercase); send it that way.
+        await signup(
+          email,
+          password,
+          username.trim().toLowerCase(),
+          displayName || undefined
+        );
       } else {
         await login(email, password);
       }
@@ -48,6 +92,32 @@ export default function AuthPage({ mode }: Props) {
 
       <form className="auth-card" onSubmit={submit}>
         <h1 className="auth-title">{isSignup ? "Create account" : "Sign in"}</h1>
+
+        {isSignup && (
+          <label className="auth-field">
+            <span>Username</span>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value.toLowerCase())}
+              required
+              minLength={3}
+              maxLength={40}
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              aria-invalid={usernameError ? true : undefined}
+              placeholder="yourname"
+            />
+            <small className="auth-hint">
+              {usernameError ? (
+                <span className="error">{usernameError}</span>
+              ) : (
+                <>This becomes your pad address: <code>{username || "yourname"}/padname</code></>
+              )}
+            </small>
+          </label>
+        )}
 
         {isSignup && (
           <label className="auth-field">

@@ -641,3 +641,31 @@ effort. Running status lives in `PRODUCTION_READINESS.md`. Judgment calls below.
   missing object, so `delete_object` treats that body shape as 'already gone' to keep deletion
   idempotent (matching the old S3 behavior callers rely on).
 
+## 2026-06-28 — Signup form was missing the required `username` field (frontend/backend mismatch)
+
+- **Bug:** the backend `SignupIn` schema gained a required `username` field as part of the
+  username/URL-scheme work, but the frontend signup form (`AuthPage.tsx`) and the `signup()`
+  helper (`auth.tsx`) were never updated — they only sent `email`/`password`/`display_name`. So
+  **every signup 422'd** with `{"loc":["body","username"],"msg":"Field required"}`. This is a
+  classic frontend/backend mismatch: the server contract changed and the client form wasn't
+  updated in lockstep. **Lesson for future schema changes: when adding/changing a required
+  request field, grep the frontend for the corresponding form + request builder and update both
+  in the same change (and ideally add an e2e signup check).**
+- **Fix:** added a **Username** input to the signup form (kept `display_name`, which is still
+  used to render the user in the dashboard + top bar — `user.display_name || user.email`); the
+  `signup()` helper now sends `username`. Client-side validation **mirrors the server rules**
+  (`app/services/username.py` + `RESERVED_SLUGS`): 3–40 chars, lowercase
+  `[a-z0-9_-]`, start/end alphanumeric, no consecutive hyphens, reserved-word exclusion — so the
+  user gets inline feedback instead of a 422. Input is lower-cased as typed (usernames are stored
+  normalized) and the field is labelled with a hint ("This becomes your pad address:
+  yourname/padname"). `readError` now also surfaces FastAPI list-style validation messages.
+- **Verified end-to-end against the deployed Render backend:** a signup *with* username returned
+  **202** ("confirm your email" — the project requires email confirmation; the 422 is gone),
+  while the control *without* username still returned **422**. The throwaway test user was
+  deleted from `auth.users` afterward (no `public.users` row is created until a session exists).
+- **Note (out of scope, flagged):** on the Supabase signup path the backend enforces only the
+  Pydantic length bounds on `username` (3–40), not the full regex/reserved-word check that the
+  legacy `create_user` path runs via `username_service.validate_username`. Client-side validation
+  now covers this for the UI, but server-side enforcement on the Supabase path is a separate
+  hardening follow-up if stricter guarantees are wanted.
+

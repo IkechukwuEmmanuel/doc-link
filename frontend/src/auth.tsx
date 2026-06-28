@@ -28,6 +28,7 @@ interface AuthContextValue {
   signup: (
     email: string,
     password: string,
+    username: string,
     displayName?: string
   ) => Promise<void>;
   logout: () => Promise<void>;
@@ -43,7 +44,13 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 async function readError(resp: Response, fallback: string): Promise<string> {
   const body = await resp.json().catch(() => ({}));
-  return typeof body.detail === "string" ? body.detail : fallback;
+  const detail = body.detail;
+  if (typeof detail === "string") return detail;
+  // FastAPI validation errors arrive as a list of {loc, msg, ...}.
+  if (Array.isArray(detail) && detail.length && typeof detail[0]?.msg === "string") {
+    return detail[0].msg;
+  }
+  return fallback;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -87,13 +94,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signup = useCallback(
-    async (email: string, password: string, displayName?: string) => {
+    async (
+      email: string,
+      password: string,
+      username: string,
+      displayName?: string
+    ) => {
       const resp = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           email,
           password,
+          username,
           display_name: displayName || null,
         }),
       });
