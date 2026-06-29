@@ -78,15 +78,17 @@ async def test_patch_rename_owner_only(client):
     await client.post("/api/pads", json={"slug": "rename-me"}, headers=_auth(owner_token))
 
     bad = await client.patch(
-        "/api/pads/rename-me", json={"name": "Hijack"}, headers=_auth(stranger_token)
+        "/api/pads/rename-me", json={"name": "hijack"}, headers=_auth(stranger_token)
     )
     assert bad.status_code == 403
 
+    # The custom name is now the pad's canonical address, so it must satisfy the
+    # same URL-safe slug rules (lowercase, hyphens, no spaces, reserved-excluded).
     ok = await client.patch(
-        "/api/pads/rename-me", json={"name": "My Project"}, headers=_auth(owner_token)
+        "/api/pads/rename-me", json={"name": "my-project"}, headers=_auth(owner_token)
     )
     assert ok.status_code == 200
-    assert ok.json()["name"] == "My Project"
+    assert ok.json()["name"] == "my-project"
 
 
 async def test_patch_private_requires_verified_email(client, session_factory):

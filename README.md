@@ -1,4 +1,4 @@
-# SpacePad
+# River
 
 A cross-device collaborative scratchpad. Open a URL, start typing, share the link.
 Edits sync live between everyone on the same pad via CRDTs — no account required.

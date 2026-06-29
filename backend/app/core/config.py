@@ -64,8 +64,21 @@ class Settings(BaseSettings):
     def supabase_jwks_url(self) -> str:
         return f"{self.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
 
+    # Whether auth cookies (the refresh-token + PIN-unlock cookies) carry the
+    # ``Secure`` flag. Browsers DROP ``Secure`` cookies received over plain HTTP,
+    # so this must be False whenever the SPA is served over http:// — e.g. a
+    # staging/testing setup where the frontend runs on http://localhost:3000 and
+    # proxies /api to an external HTTPS backend. It is deliberately decoupled from
+    # ``environment`` (which still governs prod-only behaviour like rejecting
+    # legacy HS256 tokens): you can run a production-configured backend behind an
+    # HTTP frontend during testing. Leave unset to derive the safe default from
+    # ``environment`` (Secure everywhere except development).
+    cookie_secure: bool | None = None  # env: COOKIE_SECURE
+
     @property
     def cookies_secure(self) -> bool:
+        if self.cookie_secure is not None:
+            return self.cookie_secure
         return self.environment != "development"
 
     # Rate limiting (Phase 6). Enforced via Redis when reachable; fails open
@@ -96,6 +109,11 @@ class Settings(BaseSettings):
     pin_max_length: int = 12
     rl_pin_attempts_per_window: int = 5
     rl_pin_window_seconds: int = 300  # 5 attempts / 5 min / (pad, IP)
+
+    # Pad claim tokens. Time-bound (not single-use): a token can be submitted
+    # repeatedly until it expires; a *successful* claim consumes it. Generating a
+    # new token invalidates any still-live one for that pad (one active per pad).
+    claim_token_ttl_seconds: int = 600  # 10 minutes
 
     # Email delivery (Phase 7). If no provider is configured, transactional
     # emails are logged instead of sent (see app/services/email.py).

@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
         stop_scheduler()
 
 
-app = FastAPI(title="SpacePad", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="River", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

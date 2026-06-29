@@ -70,9 +70,9 @@ async def send_email(*, to: str, subject: str, body: str) -> None:
 
 
 def password_reset_email(link: str) -> tuple[str, str]:
-    subject = "Reset your SpacePad password"
+    subject = "Reset your River password"
     body = (
-        "We received a request to reset your SpacePad password.\n\n"
+        "We received a request to reset your River password.\n\n"
         f"Reset it here (link expires in 1 hour): {link}\n\n"
         "If you didn't request this, you can ignore this email."
     )
@@ -80,10 +80,10 @@ def password_reset_email(link: str) -> tuple[str, str]:
 
 
 def verify_email_email(link: str) -> tuple[str, str]:
-    subject = "Verify your SpacePad email"
+    subject = "Verify your River email"
     body = (
         "Confirm your email address to unlock private pads.\n\n"
         f"Verify here: {link}\n\n"
-        "If you didn't create a SpacePad account, you can ignore this email."
+        "If you didn't create a River account, you can ignore this email."
     )
     return subject, body

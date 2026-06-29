@@ -23,10 +23,14 @@ assigned round-robin per session:
 Selections render at ~18% opacity of the peer's solid color. (Live wiring: Phase 2.)
 
 ## Dashboard layout choice (Phase 5 — final)
-- **Table** layout, per the spec's own lean ("more information-dense and appropriate for
-  this audience"). Built and confirmed final in Phase 5 — the earlier "provisional"
-  qualifier no longer applies. Columns: name/slug, last edited, visibility, size, actions
-  (`AccountPads.tsx`).
+- **Google Keep-style card grid** (supersedes previous table decision)
+- Context: As part of the 2026-06-28 River visual overhaul we replaced the
+  information-dense table with a masonry/grid of raised note-like cards to
+  improve scanability, rhythm, and surface hierarchy. This change is purely
+  visual — all inline controls (rename, visibility, archive, delete) remain
+  accessible and keyboard/touch friendly.
+- Implementation: `.dash-grid` / `.dash-card` styles in `src/index.css`, and
+  `AccountPads.tsx` now renders cards instead of table rows.
 - **Name vs slug display rule** (spec §2): a renamed pad shows its custom name with the
   `/slug` trailing in muted mono; a never-renamed pad shows the slug itself in mono. So a
   pad always has a stable, scannable identity whether or not it's been named.
@@ -228,4 +232,126 @@ and components.
   to `canonical_url` after load — instead of relying on an HTTP redirect. User-visible outcome
   is the same (old links still resolve and the bar shows the canonical address), but content
   never round-trips through a redirect, so PIN-unlocked and owner views load correctly.
+
+## 2026-06-29 — Mobile & small-screen optimization pass (audit + fixes)
+
+An audit-and-fix pass making every surface hold up at real phone widths
+(360–430px) and small-tablet widths (600–768px), portrait and landscape, without
+re-deciding the underlying designs. All changes are additive (gated on width/
+pointer media queries) so the desktop experience is unchanged. Verification
+method and its limits are recorded in `PRODUCTION_READINESS.md` (no real-device
+or axe-core browser harness exists in this environment — those remain a QA step).
+
+### Cross-cutting design choices
+- **Touch targets → ≥44×44px on touch only.** Every tappable control is bumped to
+  the 44px floor under `@media (pointer: coarse)` (not by width), so mouse users
+  keep the compact desktop sizing while every touch device — phone *or* tablet —
+  gets accessible targets. Covers buttons, the copy/slug control, theme toggle
+  (made a full 44×44 square), the hint-dismiss ✕, file-chip remove ✕, the file
+  dropzone, dashboard action/tab/visibility controls, and chrome text links
+  (My Pads / Log out / state-screen links). Icon-only controls get `min-width`
+  too, not just height.
+- **No iOS focus-zoom.** All text inputs/selects/textarea are forced to ≥16px on
+  coarse pointers (the threshold below which iOS Safari zooms on focus). The
+  editor (17px), auth fields (17px), search (17px), and PIN field (22px) were
+  already compliant; the width `<select>` and the (currently unrendered) dashboard
+  rename/PIN fields are now explicitly raised so a touch *tablet* above the phone
+  breakpoint can't trigger zoom either.
+- **No sideways scroll, ever.** Belt-and-braces `overflow-x: hidden` on `html,
+  body`, plus the real fixes: the topbar columns can shrink (`min-width: 0`) and
+  the slug label truncates with ellipsis instead of pushing the bar wide; the
+  editor scroll area is `overflow-x: hidden`; remote-cursor name flags are
+  width-capped; the hero headline steps down on the narrowest phones.
+- **Safe-area insets** extended to the auth page, dashboard, and locked-pad
+  overlay (the topbar/landing/footer/pad-layout already had them), so content and
+  the theme toggle clear notches/home indicators in landscape.
+
+### Per-screen
+- **Pad editor topbar (the highest-risk screen).** The slug/copy control and the
+  connection indicator are **never** hidden at any width (spec §2.2). To make room
+  on phones: the width `<select>` is hidden (it's meaningless — the canvas fills
+  the viewport regardless via `min(100%, --canvas-max-width)`), the user's display
+  name is hidden (decorative; "My Pads" + "Log out" stay), and the brand wordmark
+  is hidden only ≤380px. Presence still collapses to a `+N` count via the existing
+  `PresenceStack` cap. The connection indicator drops its fixed-width reservation
+  on phones and ellipsizes the rare long "View-only — no edit access" string.
+- **Sign-in hint compaction (bug fix).** The previous rule hid the hint's *link
+  text* on mobile but kept the dismiss ✕ — an orphaned button. Now the hint shows
+  the full "Sign in to keep this pad forever" on desktop and a compact "Sign in"
+  on phones (two spans, CSS-swapped), so the affordance survives intact.
+- **Writing column on mobile.** Confirmed it expands to fill the narrow width
+  (no fixed A4/Letter column is enforced on phones). Chrome padding around the
+  canvas is reduced ≤640px so the text column is as wide as possible.
+- **Locked-pad screen.** Title now reserves right padding so the corner theme
+  toggle never overlaps it (was a latent overlap at all sizes, worse on a small
+  card); overlay padding respects safe-area and shrinks ≤480px. The numeric-PIN
+  keypad (`inputMode="numeric"`) and the 22px transparent PIN field were already
+  correct and are retained.
+- **Auth screens.** Added safe-area padding; fixed a double-card nesting bug in
+  `ForgotPassword`/`ResetPassword` (a `<form class="auth-card">` inside a
+  `<div class="auth-card">` doubled the border/padding and cramped narrow
+  screens) by introducing a chrome-less `.auth-form` layout class. The Google +
+  primary buttons meet the 44px touch floor.
+- **Dashboard.** The card grid already collapses to a single column on phones and
+  the row actions are already always-visible (no hover-to-reveal), so the touch
+  fallback the spec §2 requires is present. Search goes full-width and the header
+  controls wrap cleanly ≤640px.
+- **Landing.** Hero headline steps to 26px ≤480px so the longest line fits at
+  360px; the non-essential "How it works" anchor is dropped on the narrowest
+  phones to keep "Sign in" + theme toggle tappable. `prefers-reduced-motion` is
+  honoured globally (caret/connection animations) per the existing rule.
+- **File upload on touch.** Drag-drop has no mobile equivalent; the dropzone
+  already opens the native file/photo picker on tap (its `onClick`), and its label
+  now reads "Tap to add files, or drop them here" so the touch path is obvious.
+
+### Discrepancies found between documented designs and the shipped code (logged, not silently "fixed")
+- **Hidden formatting panel is not in the build.** `CollabEditor` accepts
+  `fontSize`/`fontColor` props but nothing renders a panel and no `Ctrl+Shift+F`
+  handler exists — the Phase-8 "hidden formatting panel" is not wired up. There is
+  therefore no hover/keyboard reveal needing a touch equivalent. Left as-is
+  (re-adding the feature would be new scope, not a mobile fix).
+- **The editor file panel is always stacked, not side-by-side.** `.pad-layout` is
+  `flex-direction: column` at every width, so the file tray sits *below* the
+  editor on desktop too — the documented desktop side-by-side + mobile-collapse
+  behaviour isn't active. The always-stacked layout is already correct for mobile
+  (full-width tray, no horizontal scroll), so this pass left it; re-introducing the
+  desktop split is a desktop concern, out of scope here.
+- **Homepage is a marketing page, not a "central typing element."** The current
+  `Landing` is a hero/CTA marketing page, and the time-of-day theme rotation
+  described in older notes was removed (single walnut palette + light/dark). §2.1's
+  "large central typing element" and "color-rotation system" no longer match the
+  code; the marketing landing was audited and fixed for mobile on its own terms.
+- **Dashboard inline rename / visibility menu / PIN toggle / invite-by-email are
+  not in the current `AccountPads`.** The shipped dashboard exposes Copy-link /
+  Open / Archive only. The CSS for those controls still exists (and was made
+  touch-safe defensively), but there was nothing rendered to fix.
+
+## 2026-06-29 — Naming / claiming / redirect UI
+
+UI for the rename/claim/redirect system (functional rationale in `DECISIONS.md`).
+
+- **In-pad claim affordance generates a *token*, doesn't claim directly.** Per
+  spec §3, claiming happens from the dashboard. The TopBar "Claim this pad" action
+  now mints a token and reveals a calm banner under the top bar (`.claim-banner`)
+  with the token, a copy button, and a link to the dashboard "Claim a pad" form —
+  not a modal, consistent with the anti-pattern record. (Replaces the old
+  direct-claim button, which would now fail since claim requires a token.)
+- **Dashboard "Claim a pad" form** (`.dash-claim`): three inline fields — pad URL,
+  claim token, and an always-shown PIN field ("if locked") — plus a Claim button.
+  The SPA parses the slug from the pasted URL client-side (`parseSlug`) and calls
+  the existing claim endpoint; the PIN is validated server-side. Inline success/
+  error feedback (no toast). Inputs are ≥16px (no iOS zoom) and the row wraps on
+  mobile.
+- **Inline rename on dashboard cards** (the rename UI that the spec assumes but
+  wasn't present): a "Rename" card action swaps the name into an in-place input
+  (Enter commits, Escape cancels, blur commits), lower-cased as typed to match the
+  slug rules; a 409 "name is taken" surfaces inline.
+- **"Old links" (kill the trail)** is a per-card expandable list (`.dash-links`)
+  showing each active redirect's old name with a "Kill" action — the granular
+  privacy control from spec §5. Owner-only (the endpoints enforce it).
+- **Address-bar canonicalization is now wired** (it was specced in B4 but the SPA
+  wasn't doing it): on pad load, if `canonical_url` differs from the current path,
+  `history.replaceState` updates the bar — so an old/slug URL still loads but the
+  bar shows the canonical `/{username}/{name}` (or `/{name}` for a renamed
+  anonymous pad), with no HTTP redirect.
 

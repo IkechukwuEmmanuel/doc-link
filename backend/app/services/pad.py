@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.file import File
 from app.models.pad import Pad, PadCollaborator, Visibility
+from app.services import redirect as redirect_service
 from app.services import slug as slug_service
 from app.services import storage
 
@@ -15,6 +16,14 @@ _MAX_GENERATION_ATTEMPTS = 25
 
 class SlugTakenError(Exception):
     """Raised when a requested slug already exists."""
+
+
+class NameTakenError(Exception):
+    """Raised when a rename target is already used in the pad's namespace."""
+
+    def __init__(self, name: str):
+        self.name = name
+        super().__init__(name)
 
 
 async def get_pad_by_slug(db: AsyncSession, slug: str) -> Pad | None:
@@ -50,6 +59,24 @@ async def get_pad_by_owner_and_name(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def get_anonymous_pad_by_segment(db: AsyncSession, segment: str) -> Pad | None:
+    """Resolve a single URL segment to a pad, for the dashboard claim form.
+
+    Accepts the pad's slug (global) or its current anonymous custom name. The
+    caller checks ``owner_id is None`` to decide claimability — a slug that
+    resolves to an already-owned pad is reported as "already claimed", not "not
+    found".
+    """
+    pad = await get_pad_by_slug(db, segment)
+    if pad is not None:
+        return pad
+    return (
+        await db.execute(
+            select(Pad).where(Pad.owner_id.is_(None), Pad.name == segment)
+        )
+    ).scalar_one_or_none()
 
 
 async def touch_last_opened(db: AsyncSession, pad: Pad) -> None:
@@ -115,20 +142,6 @@ async def update_pad_content(db: AsyncSession, pad: Pad, content: str) -> Pad:
     return pad
 
 
-class PadAlreadyOwnedError(Exception):
-    """Raised when claiming a pad that already has an owner."""
-
-
-async def claim_pad(db: AsyncSession, pad: Pad, owner_id) -> Pad:
-    if pad.owner_id is not None:
-        raise PadAlreadyOwnedError(pad.slug)
-    pad.owner_id = owner_id
-    pad.is_anonymous = False
-    await db.commit()
-    await db.refresh(pad)
-    return pad
-
-
 _UNSET = object()
 
 
@@ -145,22 +158,63 @@ async def update_pad_metadata(
     Only fields explicitly passed (not ``_UNSET``) are applied, so ``name=None``
     clears the custom name while an omitted ``name`` leaves it untouched.
     
-    When renaming, the old name is added to previous_names for redirect tracking.
+    Renaming is handled separately by ``rename_pad`` (it needs a namespaced
+    uniqueness check + redirect bookkeeping in one transaction); ``name`` here is
+    accepted only as a no-op convenience and ignored if it equals the current
+    name. Callers that rename must use ``rename_pad``.
     """
-    if name is not _UNSET and name != pad.name:
-        # Store the old name in previous_names for redirect tracking
-        if pad.name:
-            if isinstance(pad.previous_names, list):
-                if pad.name not in pad.previous_names:
-                    pad.previous_names.append(pad.name)
-            else:
-                pad.previous_names = [pad.name]
-        pad.name = name
     if visibility is not _UNSET and visibility is not None:
         pad.visibility = visibility
     if is_archived is not _UNSET and is_archived is not None:
         pad.is_archived = is_archived
     await db.commit()
+    await db.refresh(pad)
+    return pad
+
+
+async def rename_pad(db: AsyncSession, pad: Pad, new_name: str) -> Pad:
+    """Rename a pad's canonical name within its namespace (anonymous or claimed).
+
+    The custom name is the pad's address segment, so it must satisfy the same
+    URL-safe format + reserved-word rules as a slug. Uniqueness is checked within
+    the pad's namespace only (anonymous = global flat pool; claimed = per owner).
+    On collision we reject (never auto-suffix); the partial unique indexes on
+    ``pads.name`` are the race backstop. One transaction:
+    validate → check → set name → update redirect trail → commit.
+
+    Raises ``slug_service.SlugError`` (bad format) or ``NameTakenError`` (taken).
+    """
+    normalized = slug_service.validate_custom_slug(new_name)
+    namespace, ns_owner = redirect_service.namespace_of(pad)
+
+    current_canonical = pad.name or pad.slug
+    if normalized == current_canonical:
+        return pad  # no-op rename
+
+    if not await redirect_service.is_name_available(
+        db,
+        normalized,
+        namespace=namespace,
+        namespace_owner=ns_owner,
+        exclude_pad_id=pad.id,
+    ):
+        raise NameTakenError(normalized)
+
+    old_name = pad.name  # the previous custom name (None if never renamed)
+    pad.name = normalized
+    await redirect_service.record_name_change(
+        db,
+        pad,
+        old_name=old_name,
+        old_namespace=namespace,
+        old_namespace_owner=ns_owner,
+    )
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Lost a concurrent-rename race on the partial unique index.
+        await db.rollback()
+        raise NameTakenError(normalized)
     await db.refresh(pad)
     return pad
 

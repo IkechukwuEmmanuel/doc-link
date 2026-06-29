@@ -7,7 +7,14 @@ import CollabEditor from "../components/CollabEditor";
 import FileTray from "../components/FileTray";
 import { ConnectionState } from "../components/ConnectionIndicator";
 import { PresencePeer } from "../components/PresenceStack";
-import { Pad as PadModel, PinFormat, createPad, getPad, unlockPad } from "../api";
+import {
+  Pad as PadModel,
+  PinFormat,
+  createPad,
+  generateClaimToken,
+  getPad,
+  unlockPad,
+} from "../api";
 import { useAuth } from "../auth";
 import { useTheme } from "../useTheme";
 
@@ -29,6 +36,8 @@ export default function Pad() {
   const [peers, setPeers] = useState<PresencePeer[]>([]);
   const [connection, setConnection] = useState<ConnectionState>("connected");
   const [ownerId, setOwnerId] = useState<string | null>(null);
+  const [claimToken, setClaimToken] = useState<string | null>(null);
+  const [claimErr, setClaimErr] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +48,14 @@ export default function Pad() {
         if (res.kind === "found") {
           setPad(res.pad);
           setOwnerId(res.pad.owner_id);
+          // Canonicalize the address bar client-side (AUDIT B4 — no HTTP 301):
+          // an old/slug URL stays resolvable but the bar shows the canonical one.
+          if (
+            res.pad.canonical_url &&
+            res.pad.canonical_url !== window.location.pathname
+          ) {
+            window.history.replaceState(null, "", res.pad.canonical_url);
+          }
           setStatus("ready");
         } else if (res.kind === "forbidden") {
           setStatus("forbidden");
@@ -57,13 +74,15 @@ export default function Pad() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [padIdentifier, authedFetch]);
 
+  // Claiming happens from the dashboard (spec §3). In-pad we only mint a
+  // time-bound claim token for the user to submit there.
   async function claim() {
-    const resp = await authedFetch(`/api/pads/${encodeURIComponent(padIdentifier)}/claim`, {
-      method: "POST",
-    });
-    if (resp.ok) {
-      const claimed = await resp.json();
-      setOwnerId(claimed.owner_id);
+    setClaimErr("");
+    try {
+      const { token } = await generateClaimToken(padIdentifier, authedFetch);
+      setClaimToken(token);
+    } catch (e) {
+      setClaimErr((e as Error).message);
     }
   }
 
@@ -159,6 +178,40 @@ export default function Pad() {
         canClaim={!!user && ownerId === null}
         onClaim={claim}
       />
+      {claimErr && (
+        <div className="claim-banner" role="alert">
+          <span className="error">{claimErr}</span>
+        </div>
+      )}
+      {claimToken && (
+        <div className="claim-banner" role="status">
+          <p className="claim-banner-title">Claim token generated</p>
+          <p className="claim-banner-hint">
+            Paste this pad's URL and the token below into{" "}
+            <Link to="/account/pads" className="text-link">
+              your dashboard → “Claim a pad”
+            </Link>
+            . It expires in a few minutes.
+          </p>
+          <code className="claim-banner-token">{claimToken}</code>
+          <div className="claim-banner-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => navigator.clipboard?.writeText(claimToken).catch(() => {})}
+            >
+              Copy token
+            </button>
+            <button
+              type="button"
+              className="text-link"
+              onClick={() => setClaimToken(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       <div className="pad-canvas-scroll">
         <div className="pad-layout">
           <div className="pad-canvas">

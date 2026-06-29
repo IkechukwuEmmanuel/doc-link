@@ -10,6 +10,55 @@ ambiguities are resolved toward the simplest, most boring, production-safe optio
 
 ---
 
+## 2026-06-28 — River UI overhaul (brand + visual system)
+
+**Rename → River (user-facing) → Rationale**
+- Context: The product is being rebranded for user-facing copy only; internal
+  identifiers and package names remain unchanged where risky to rename.
+- Decision: All user-visible instances of the product name are `River` (titles,
+  emails, meta tags, aria-labels, wordmarks). Internal names (package.json,
+  DB table names) are left as-is to avoid deployment/CI risk.
+
+**Single-palette walnut-ink → Rationale**
+- Context: Prior five-theme experiment (oxidized-copper, storm-slate, etc.) was
+  judged too exploratory and inconsistent.
+- Decision: The frontend ships a single desaturated walnut palette with light
+  and dark variants. The five-theme picker is cancelled; theme UI reduced to a
+  light/dark toggle. This is implemented via `frontend/src/styles/tokens.css`.
+
+**Typography — serif headlines**
+- Context: Headings previously used the UI sans. The design brief requested a
+  serif editorial tone for headings while keeping sans for body text.
+- Decision: Headings use a serif stack (Georgia / Source Serif 4 / Lora); body
+  and UI text remain Inter (variable). Implemented in `src/styles/tokens.css`
+  and `src/index.css`.
+
+**Elevation system — canvas & cards**
+- Context: The UI was judged visually flat with insufficient surface hierarchy.
+- Decision: Introduce `--color-surface-raised`, `--shadow-card`, and a small
+  border for cards, topbars, and editor canvas. Buttons gain a filled primary
+  state. Implemented across `src/index.css` and component styles.
+
+**Dashboard — Keep-style card grid**
+- Context: The prior decision in Design tracked a table-based dashboard. The
+  visual overhaul mandates a masonry/grid of raised cards (Google Keep-style)
+  for better scannability and rhythm.
+- Decision: Replace the table with a responsive card-grid (`.dash-grid` and
+  `.dash-card`) that retains existing inline controls and accessibility
+  behaviors. `frontend/src/pages/AccountPads.tsx` was updated to render cards.
+
+**Safe-area insets (notched devices)**
+- Context: The overhaul's mobile audit required safe-area handling, which was
+  missing — the viewport meta lacked `viewport-fit=cover` and no element used
+  `env(safe-area-inset-*)`.
+- Decision: Added `viewport-fit=cover` to the viewport meta and applied
+  `env(safe-area-inset-*)` (via `max()` so existing padding is the floor) to the
+  edge-touching elements: `.topbar` (top/sides — its height grows by the top
+  inset so contents stay below the notch), `.landing-header` (top/sides),
+  `.landing-footer-inner` (bottom/sides), and `.pad-layout` (bottom/sides, to
+  keep the file tray clear of the home indicator).
+
+
 ## Infrastructure & tooling
 
 **Local stack via Docker Compose.** Postgres 16, Redis 7, and MinIO (S3-compatible)
@@ -668,4 +717,117 @@ effort. Running status lives in `PRODUCTION_READINESS.md`. Judgment calls below.
   legacy `create_user` path runs via `username_service.validate_username`. Client-side validation
   now covers this for the UI, but server-side enforcement on the Supabase path is a separate
   hardening follow-up if stricter guarantees are wanted.
+
+## 2026-06-29 — Mobile & small-screen optimization pass
+
+Frontend-only, additive (no backend/API/contract changes). Full design-track
+rationale and the per-screen breakdown live in `DESIGN_DECISIONS.md`
+(§"Mobile & small-screen optimization pass"); verification + its limits are in
+`PRODUCTION_READINESS.md` (§"Mobile optimization"). Judgment calls captured here:
+
+- **Touch-target floor gated on `pointer: coarse`, not viewport width.** A touch
+  tablet at 800px still needs 44px targets, and a narrow desktop window does not —
+  so the 44px bumps are keyed to the input modality, matching the spec's "on touch
+  devices" wording rather than a width breakpoint.
+- **Width selector hidden on phones rather than restricted.** The editor width
+  presets are decorative (`min(100%, --canvas-max-width)` already makes the canvas
+  fill a narrow viewport), so offering Narrow/Standard/Wide on a phone is
+  meaningless; the control is hidden ≤640px instead of pruning its options.
+- **`overflow-x: hidden` on `html, body` as a safety net** *in addition to* fixing
+  the real overflow sources (shrinkable topbar columns, truncating slug label,
+  width-capped remote-cursor flags). The net is intentional defence-in-depth, not a
+  substitute for the targeted fixes.
+- **Discrepancies between older documented designs and the shipped code were logged,
+  not silently rebuilt:** the hidden formatting panel is not wired up; the editor's
+  file panel is always stacked (never side-by-side); the homepage is a marketing
+  page (no central typing element / theme rotation); several documented dashboard
+  inline controls aren't rendered. Re-adding any of these would be new scope, not a
+  mobile fix, so this pass optimized what actually ships and recorded the gaps. See
+  `DESIGN_DECISIONS.md` for specifics.
+- **No backend or test changes.** This pass touches only frontend CSS/TSX; the
+  Python suite and API are untouched, so no new server tests were added.
+
+## 2026-06-29 — Pad naming / claiming / redirect system (Path A)
+
+Implements the rename/claim/redirect spec **adapted onto the existing model**
+(Path A, confirmed with the requester) rather than the spec's literal schema.
+The immutable global `pads.slug` and the AUDIT B3/B4 decisions are untouched.
+
+### Model mapping (spec → shipped)
+- **Immutable slug, mutable name.** `pads.slug` stays the global-unique, immutable
+  id; the canonical *address* is the mutable `pads.name`. Renaming changes `name`,
+  never `slug` (so the slug always keeps resolving — that's why claimed/renamed
+  pads still load by their original `/{slug}`).
+- **`redirects` table replaces `previous_names` JSON.** A real table gives
+  per-entry "kill the trail", `created_at`, and DB-enforced uniqueness the JSON
+  array couldn't. Two namespaces via two **partial unique indexes**
+  (`uq_redirect_anon_active` on `old_slug WHERE active AND namespace='anonymous'`;
+  `uq_redirect_claimed_active` on `(namespace_owner, old_slug) WHERE active AND
+  namespace='claimed'`) — a single index can't enforce the anonymous pool because
+  `namespace_owner` is NULL there and NULLs are distinct in a unique index
+  (verified against real Postgres). `services/redirect.py` owns resolution,
+  namespaced uniqueness, and the "point every redirect at the current canonical,
+  never chain" bookkeeping.
+- **`claim_tokens` table layered on the existing claim endpoint.**
+  `POST /api/pads/{slug}/claim-token` mints a time-bound token (10 min,
+  `claim_token_ttl_seconds`, one active per pad); the existing
+  `POST /api/pads/{slug}/claim` now requires `{token, pin?}` and is driven from
+  the dashboard form. `services/claim.py` does the transfer.
+- **Redirect resolution is NOT a 301 (B4 preserved).** Old names resolve to the
+  live pad and return `200` + `canonical_url`; the SPA canonicalizes the address
+  bar (`history.replaceState`). `canonical_url` is now computed in `_pad_out` so
+  every response (load, rename, claim) carries it.
+- **Rename backstop indexes on `pads.name`** (`uq_pad_anon_name`,
+  `uq_pad_owner_name`, both partial, NULLs excluded) catch concurrent same-name
+  renames; the app-level `is_name_available` check is the fast-path UX. Name-vs-
+  slug collisions (which no single index spans) are caught by the app check.
+
+### Judgment calls
+- **Custom name must be URL-safe (validated like a slug).** Since the name is now
+  the address segment, `rename_pad` validates it with `slug_service.validate_custom_slug`
+  (3–40, lowercase, hyphens, reserved-word-excluded). This **changes prior rename
+  behavior** (free-form names like "My Project" are now rejected); the existing
+  rename test was updated to "my-project". Consistent with the existing "custom
+  name is the actual address" decision and keeps `new`/`raw`/etc. from becoming
+  pad names that break routing.
+- **Reject-on-collision, never auto-suffix** for pad names (409 "That name is
+  taken."). **The H2 username auto-suffix in `services/user.py` is untouched** —
+  different namespace, different failure mode (background gotrue mirror that must
+  not 500). Confirmed with the requester.
+- **PIN persists through claim (option b).** `claim_with_token` leaves
+  `pin_protected`/`pin_hash` intact; the claimer proves the PIN at claim time
+  (rate-limited via the existing `check_pin_attempt`, generic error so there's no
+  token-validity oracle). The private⊕pin_protected mutual exclusion is untouched
+  because a claim never sets `private`.
+- **Anonymous pads became renameable/PIN-settable by extending PATCH.** The
+  endpoint was owner-only, so anonymous (ownerless, world-editable) pads had *no*
+  management path. `patch_pad` now splits authorization: owned → owner-only;
+  anonymous → any caller, but gated by the PIN if the pad is locked (`has_pin_access`).
+  This is what makes "a creator protects a pad by PIN-locking it first" real, per
+  the requester's anonymous-owner resolution. `private` still requires a verified
+  account (so an anonymous actor can never set it).
+- **Single-winner claim enforced at the SQL layer.** Ownership transfer is an
+  atomic `UPDATE pads … WHERE owner_id IS NULL`; token consumption an atomic
+  `UPDATE claim_tokens … WHERE consumed=false AND expires_at>now` (re-checks expiry
+  inside the transaction). A failed claim (wrong PIN) never consumes the token
+  ("not single-use"); a successful one does.
+- **Redirect management is owner-only.** `GET/DELETE /api/pads/{slug}/redirects[/{id}]`
+  require ownership — "kill the trail" is a privacy control for claimed pads.
+  Anonymous-pad redirect management is intentionally not exposed (privacy is moot
+  for world-editable pads).
+
+### Migration & data safety
+- New revision `i9j0k1l2m3n4` (head; `alembic heads` is single). Read-only §8
+  checks against the **live DB** before any DDL: 8 pads / 1 user, **0 duplicate
+  slugs, 0 duplicate (owner,name), 0 null slugs, 0 pads with previous_names** — so
+  the additive tables + name indexes are safe and there's nothing to backfill.
+- **Validated against real throwaway Postgres 16**, not just the SQLite harness:
+  `upgrade head` and `downgrade base` both succeed; on a fresh DB the two tables,
+  all five partial indexes, and the `previous_names` drop are present; the anon
+  partial unique index was shown to reject a duplicate (the NULL-owner concern).
+- **NOT auto-applied to production.** The live DB now holds real rows and the
+  migration drops a column, so applying it is a gated deploy step requiring a
+  manual snapshot first (which can't be taken from this environment). Surfaced in
+  `PRODUCTION_READINESS.md` as a required ops action, mirroring the project's
+  snapshot-before-DDL rule — not applied silently.
 

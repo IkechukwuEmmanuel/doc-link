@@ -1,4 +1,4 @@
-# SpacePad — Production Readiness Audit
+# River — Production Readiness Audit
 
 **Run date:** 2026-06-27
 **Auditor:** Claude Code (automated)

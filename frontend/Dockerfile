@@ -1,4 +1,4 @@
-# SpacePad frontend — production image (multi-stage).
+# River frontend — production image (multi-stage).
 #
 # Stage 1 builds the Vite app (tsc -b && vite build → /app/dist). Stage 2 serves
 # the static output with nginx (SPA fallback + /api reverse proxy with WebSocket

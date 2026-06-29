@@ -38,6 +38,31 @@ class PinUnlockIn(BaseModel):
     pin: str = Field(min_length=1, max_length=64)
 
 
+class ClaimIn(BaseModel):
+    """Dashboard claim submission. ``token`` is required; ``pin`` only when the
+    pad is PIN-protected (the form always shows the field; blank otherwise)."""
+
+    token: str = Field(min_length=1, max_length=64)
+    pin: str | None = Field(default=None, max_length=64)
+
+
+class ClaimTokenOut(BaseModel):
+    token: str
+    expires_at: datetime
+
+
+class RedirectOut(BaseModel):
+    """A historical address that still resolves to a pad (the "old links" view)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    old_slug: str
+    namespace: str
+    target_url: str
+    created_at: datetime
+
+
 class PadOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

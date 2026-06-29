@@ -18,10 +18,10 @@ interface Props {
   onClaim?: () => void;
 }
 
-const dismissKey = (slug: string) => `spacepad-hint-dismissed:${slug}`;
+const dismissKey = (slug: string) => `river-hint-dismissed:${slug}`;
 
 type WidthPreset = "narrow" | "standard" | "wide";
-const WIDTH_KEY = "spacepad-editor-width";
+const WIDTH_KEY = "river-editor-width";
 
 function getWidthValue(preset: WidthPreset): number {
   switch (preset) {
@@ -96,7 +96,12 @@ export default function TopBar({
         )}
         {!user && !hintDismissed && (
           <span className="signin-hint">
-            <Link to="/login">Sign in to keep this pad forever</Link>
+            <Link to="/login">
+              {/* Full sentence on desktop; a compact "Sign in" on phones so the
+                  affordance survives without a dangling dismiss button. */}
+              <span className="signin-hint-full">Sign in to keep this pad forever</span>
+              <span className="signin-hint-short">Sign in</span>
+            </Link>
             <button
               type="button"
               className="hint-dismiss"

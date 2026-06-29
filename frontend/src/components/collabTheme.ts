@@ -1,7 +1,7 @@
 import { EditorView } from "@codemirror/view";
 
-/** Maps CodeMirror 6 onto SpacePad's design tokens so the editor surface is
-    visually continuous with the homepage hero textarea. */
+/** Maps CodeMirror 6 onto River's design tokens so the editor surface is
+    visually continuous with the rest of the app. */
 export const editorTheme = EditorView.theme({
   "&": {
     color: "var(--color-text-primary)",

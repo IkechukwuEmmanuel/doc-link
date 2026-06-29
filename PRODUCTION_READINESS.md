@@ -118,7 +118,7 @@ exist in the repo; the equivalent decisions live in `DECISIONS.md` (§"URL Schem
   build → nginx serving static `dist` with SPA fallback + `/api` WebSocket-aware reverse proxy
   via `nginx.conf.template`). Verified locally: backend image built, ran against compose
   Postgres/Redis → `/health`=200, `/health/ready`=200 `{database:ok}`; frontend image
-  built, `/`=200 and SPA fallback `/alice/notes`=200 serving `<title>SpacePad</title>`.
+  built, `/`=200 and SPA fallback `/alice/notes`=200 serving `<title>River</title>`.
   **Constraint (documented in the Dockerfile):** CRDT rooms are in-memory per process → single
   worker only; scaling out needs a shared Y store / sticky routing first.
 - [x] **B2 — CI pipeline**
@@ -189,6 +189,99 @@ exist in the repo; the equivalent decisions live in `DECISIONS.md` (§"URL Schem
 - [x] `README.md` Status table updated to reflect actual state.
 - [x] This file is current and handoff-ready.
 
+## 2026-06-29 — Mobile & small-screen optimization
+
+Audit-and-fix pass for phones and small tablets. Decisions in `DECISIONS.md` /
+`DESIGN_DECISIONS.md` (both dated 2026-06-29). Frontend-only, additive.
+
+**What was tested and how (honest scope):** review was done by **static code +
+CSS audit against the breakpoint matrix**, plus a successful production frontend
+build (`npm run build` → `tsc -b && vite build`, clean). This environment has
+**no browser/device harness and no axe-core**, so the live on-device checks the
+prompt asks for (real Chrome/Safari device emulation, keyboard-open behaviour,
+battery/frame profiling of the locked-pad animation) and the **axe-core mobile-
+viewport pass** could not be executed here — they remain a QA step (see the ops
+list). Widths reasoned against: **360 / 390 / 430** (phones, portrait), **600 /
+768** (small tablet), and landscape variants.
+
+- [x] **No horizontal scroll** — `overflow-x: hidden` on `html, body`; topbar
+  columns made shrinkable (`min-width: 0`); slug copy-label truncates; editor
+  scroll area `overflow-x: hidden`; remote-cursor flags width-capped; hero
+  headline steps down ≤480px. Verified by audit at 360px against each screen.
+- [x] **Touch targets ≥44×44** — applied under `@media (pointer: coarse)` to all
+  tappable controls (buttons, copy/slug, theme toggle as a 44² square, dismiss ✕,
+  file-chip ✕, dropzone, dashboard actions/tabs, chrome links). Icon-only controls
+  get `min-width` too.
+- [x] **No iOS focus-zoom** — inputs/selects/textarea forced ≥16px on coarse
+  pointers; editor (17), auth (17), search (17), PIN (22) already compliant; width
+  `<select>` + dashboard rename/PIN fields explicitly raised for touch tablets.
+- [x] **Safe areas** — extended to `.auth-page`, `.dash`, `.locked-pad-overlay`
+  (topbar/landing/footer/pad-layout already had them).
+- [x] **Pad editor topbar** — slug/copy + connection indicator never hidden at any
+  width; width selector + display name hidden on phones, brand hidden ≤380px;
+  presence still collapses to `+N`. Sign-in hint orphaned-✕ bug fixed.
+- [x] **Writing column** — fills the narrow viewport (no fixed column on phones);
+  chrome padding reduced ≤640px.
+- [x] **Locked pad** — numeric keypad (`inputMode="numeric"`) and transparent 22px
+  PIN field confirmed; title/theme-toggle overlap fixed; overlay safe-area + ≤480px
+  padding. Squiggly background is a 3-path CSS `stroke-dashoffset` animation that
+  honours `prefers-reduced-motion` (lightweight by inspection; on-device frame/
+  battery profiling still a QA step).
+- [x] **Auth screens** — safe-area added; double-`auth-card` nesting bug fixed via
+  `.auth-form`; OAuth + primary buttons meet 44px.
+- [x] **Dashboard** — single-column grid on phones (pre-existing); actions
+  always-visible (touch fallback present); search full-width + header wraps ≤640px.
+- [x] **Landing** — hero fits 360px; non-essential anchor dropped on narrowest
+  phones; reduced-motion honoured.
+- [x] **File upload on touch** — dropzone opens the native picker on tap; label
+  reworded for touch ("Tap to add files, or drop them here").
+- [D] **Real-device + axe-core mobile pass** — deferred to QA (no browser harness
+  in this environment). Run axe-core in a mobile viewport and exercise the
+  keyboard-open editor flow + locked-pad animation on a real iOS/Android device
+  before launch.
+- [x] **No desktop regression** — every change is gated behind a width or
+  `pointer: coarse` media query (or is a strict bug fix: orphaned ✕, doubled auth
+  card, slug overflow), so desktop rendering paths are unchanged. Build is green.
+
+## 2026-06-29 — Pad naming / claiming / redirect system (Path A)
+
+Decisions in `DECISIONS.md` / `DESIGN_DECISIONS.md` (dated 2026-06-29). Backend +
+frontend; one new Alembic revision.
+
+- [x] **Backend suite** — `pytest -q` → **147 passed** (135 prior + 12 new in
+  `tests/test_naming_redirects.py`: namespaced rename collisions, cross-owner
+  isolation, reserved/malformed rejection, anonymous rename + resolution, claim
+  token single-active/required, PIN-persists-and-gates-on-claim, redirect never
+  chains, kill-the-trail frees the name, owner-only redirect listing). Updated the
+  two contract-changed tests (claim now token-gated; rename now slug-validated).
+- [x] **Lint** — `ruff check .` clean.
+- [x] **Migration validated on real Postgres 16** (throwaway container, not just
+  the SQLite harness): `alembic upgrade head` + `alembic downgrade base` both
+  succeed; `alembic heads` is a single head (`i9j0k1l2m3n4`). On a fresh DB the
+  `redirects` + `claim_tokens` tables, all five partial indexes
+  (`uq_redirect_anon_active`, `uq_redirect_claimed_active`, `uq_pad_anon_name`,
+  `uq_pad_owner_name`, `ix_claim_tokens_pad_unconsumed`), and the `previous_names`
+  drop are present; the anonymous partial unique index was shown to reject a
+  duplicate (confirming NULL `namespace_owner` doesn't defeat it).
+- [x] **Live read-only §8 checks before any DDL** — 8 pads / 1 user, 0 duplicate
+  slugs, 0 duplicate (owner,name), 0 null slugs, 0 pads with `previous_names`. The
+  migration is additive + drops an all-empty column → no backfill, no data-loss
+  risk.
+- [x] **Frontend build** — `tsc -b && vite build` clean.
+- [x] **Apply migration `i9j0k1l2m3n4` to the live DB** — **DONE (2026-06-29)**, on
+  explicit instruction, via the Supabase MCP (no direct connection string in this
+  env). Pre-checks re-run immediately before: `alembic_version=340f7a3d4015` (the
+  exact `down_revision`), 8 pads, 0 dup slugs/(owner,name), 0 null slugs, 0
+  `previous_names`, new tables absent. Applied the DDL faithful to the Alembic
+  `upgrade()` and advanced `alembic_version` to `i9j0k1l2m3n4`. Post-verified:
+  both tables present, all 5 partial indexes present, `previous_names` dropped,
+  **8 pads / 1 user unchanged** (no data loss). `get_advisors(security)`: the two
+  new tables are RLS-enabled / no-policy (INFO) — auto-matched to the existing
+  deny-all posture (H3); no new findings (the lone WARN is the pre-existing
+  leaked-password Auth toggle, ops #3). **Recovery point: Supabase PITR** (a manual
+  pre-snapshot couldn't be taken from this environment; the change is additive +
+  drops an all-empty column).
+
 ## Outstanding ops actions before first real traffic (not code — must be done in the platform)
 1. Finalize deployment topology; set `TRUSTED_PROXY_HOPS` to the real hop count (B3 / A7).
 2. Rotate all `change-me`/placeholder secrets; set `ENVIRONMENT` ≠ `development`; confirm pooled
@@ -203,3 +296,12 @@ exist in the repo; the equivalent decisions live in `DECISIONS.md` (§"URL Schem
    `pad-files` bucket passed all steps (run with the service-role key, which was not persisted).
    Fixed a Supabase delete quirk in the process (HTTP 400 + `statusCode:"404"` body on missing
    object → treated as already-gone). Re-confirm in the actual production project at deploy.
+8. Run the **axe-core accessibility pass in a mobile viewport** and exercise the mobile editor
+   with the on-screen keyboard open + the locked-pad animation on a real iOS/Android device — the
+   code-level mobile fixes (2026-06-29) were verified by audit + build only; no browser/device
+   harness exists in this environment.
+9. ~~Apply Alembic migration `i9j0k1l2m3n4`~~ **DONE (2026-06-29):** applied to the live DB via
+   the Supabase MCP on explicit instruction; pre-checks + post-verification recorded in the
+   "Pad naming / claiming / redirect system" section above. Recovery point is Supabase PITR (no
+   manual pre-snapshot was possible from this environment). When deploying from a machine with the
+   direct DB URL, `alembic upgrade head` is a no-op (the version pointer is already at the head).

@@ -41,7 +41,7 @@ export default function ResetPassword() {
             </Link>
           </p>
         ) : (
-          <form className="auth-card" onSubmit={submit}>
+          <form className="auth-form" onSubmit={submit}>
             <label className="auth-field">
               New password
               <input

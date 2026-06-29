@@ -22,6 +22,15 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Hard guard against accidental sideways scroll on narrow viewports. Every
+   layout below is sized to fit; this is the belt-and-braces so a single long
+   token (slug, filename, remote-cursor flag) can never push the page wide. */
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
 /* Headings use the serif (deliberate, permanent). Body, UI labels, buttons, and
    the editor writing surface stay sans (see .editor, .btn, etc.). */
 h1, h2, h3 {
@@ -108,7 +117,8 @@ h1, h2, h3 {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: max(var(--space-2), env(safe-area-inset-top)) max(var(--space-3), env(safe-area-inset-right))
+    var(--space-2) max(var(--space-3), env(safe-area-inset-left));
   max-width: 1080px;
   width: 100%;
   margin: 0 auto;
@@ -303,7 +313,8 @@ h1, h2, h3 {
 .landing-footer-inner {
   max-width: 1080px;
   margin: 0 auto;
-  padding: var(--space-4) var(--space-3);
+  padding: var(--space-4) max(var(--space-3), env(safe-area-inset-right))
+    max(var(--space-4), env(safe-area-inset-bottom)) max(var(--space-3), env(safe-area-inset-left));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -333,9 +344,12 @@ h1, h2, h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: var(--topbar-height);
-  flex: 0 0 var(--topbar-height);
-  padding: 0 var(--space-2);
+  /* grow the bar by the top inset so its contents stay below the notch
+     rather than being squeezed (box-sizing is border-box) */
+  height: calc(var(--topbar-height) + env(safe-area-inset-top));
+  flex: 0 0 calc(var(--topbar-height) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(var(--space-2), env(safe-area-inset-right)) 0
+    max(var(--space-2), env(safe-area-inset-left));
   background: var(--color-surface-raised);
   border-bottom: 1px solid var(--color-border-subtle);
   box-shadow: var(--shadow-sm);
@@ -347,7 +361,13 @@ h1, h2, h3 {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0; /* allow children (slug) to shrink instead of overflowing */
 }
+/* The left cluster (brand + slug) is the part that must flex/truncate; the
+   right cluster holds fixed-size controls. */
+.topbar-left { flex: 1 1 auto; }
+.topbar-right { flex: 0 0 auto; }
+.brand-mark { flex: none; }
 .brand-mark {
   display: inline-flex;
   align-items: center;
@@ -381,9 +401,19 @@ h1, h2, h3 {
   background: var(--color-surface);
   color: var(--color-text-primary);
 }
+/* The slug label must be able to shrink and ellipsize — a long
+   username/padname must never force the topbar (and thus the page) wide. */
+.copy-btn { min-width: 0; }
+.copy-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46vw;
+}
 .copy-btn .copy-icon {
   display: inline-flex;
   color: var(--color-text-muted);
+  flex: none;
 }
 .copy-btn.is-copied {
   color: var(--color-success);
@@ -458,6 +488,11 @@ h1, h2, h3 {
 }
 .signin-hint a:hover {
   color: var(--color-accent);
+}
+.signin-hint-short { display: none; }
+@media (max-width: 640px) {
+  .signin-hint-full { display: none; }
+  .signin-hint-short { display: inline; }
 }
 .hint-dismiss {
   background: none;
@@ -543,12 +578,16 @@ h1, h2, h3 {
 .pad-canvas-scroll {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden; /* vertical scroll only — never sideways */
   background: var(--color-bg);
 }
 .pad-layout {
   width: min(100%, var(--canvas-max-width));
   margin: 0 auto;
-  padding: var(--space-4) var(--space-3) var(--space-8);
+  /* reduce top padding so short pads don't leave a large gulf;
+     keep the file tray clear of the home indicator on notched devices */
+  padding: var(--space-3) max(var(--space-3), env(safe-area-inset-right))
+    max(var(--space-6), env(safe-area-inset-bottom)) max(var(--space-3), env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -559,12 +598,15 @@ h1, h2, h3 {
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
-  padding: var(--space-4);
+  padding: var(--space-3);
+  /* make the canvas sit visually above the page and pull content up */
+  margin-top: 4px;
 }
 .editor {
   display: block;
   width: 100%;
-  min-height: 52vh;
+  /* reduce min-height so empty pads don't feel like empty gulfs */
+  min-height: 40vh;
   border: none;
   outline: none;
   resize: none;
@@ -592,6 +634,17 @@ h1, h2, h3 {
   color: var(--color-text-muted);
   font-size: var(--text-lg);
   font-weight: 500;
+}
+/* Remote-peer cursor flags (y-codemirror.next). On a narrow phone column a long
+   name like "Anonymous Marten" can crowd or overlap the text, so cap the flag
+   width and keep it from forcing horizontal scroll. */
+.cm-host .cm-ySelectionInfo {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .save-indicator {
@@ -693,6 +746,42 @@ a.file-chip-name:hover {
   color: var(--color-danger);
 }
 
+/* in-pad claim-token banner */
+.claim-banner {
+  background: var(--color-surface-raised);
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding: var(--space-2) max(var(--space-3), env(safe-area-inset-right))
+    var(--space-2) max(var(--space-3), env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.claim-banner-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+.claim-banner-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+.claim-banner-token {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  word-break: break-all;
+}
+.claim-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 /* state screens */
 .pad-state {
   height: 100%;
@@ -726,7 +815,18 @@ a.file-chip-name:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-4);
+  padding: max(var(--space-4), env(safe-area-inset-top))
+    max(var(--space-4), env(safe-area-inset-right))
+    max(var(--space-4), env(safe-area-inset-bottom))
+    max(var(--space-4), env(safe-area-inset-left));
+}
+/* Inner form layout that does NOT re-draw the card chrome — used where a form
+   sits inside an .auth-card (avoids the doubled border/padding that cramped
+   narrow screens). */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 .auth-card {
   width: 100%;
@@ -813,7 +913,8 @@ a.file-chip-name:hover {
 .dash {
   max-width: 1100px;
   margin: 0 auto;
-  padding: var(--space-3);
+  padding: var(--space-3) max(var(--space-3), env(safe-area-inset-right))
+    max(var(--space-3), env(safe-area-inset-bottom)) max(var(--space-3), env(safe-area-inset-left));
   line-height: var(--leading-scan);
 }
 .dash-header {
@@ -855,6 +956,83 @@ a.file-chip-name:hover {
 .dash-search:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+
+/* claim-a-pad form */
+.dash-claim {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+.dash-claim-fields {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.dash-claim-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.dash-claim-input {
+  font: inherit;
+  font-size: var(--text-md);
+  padding: 9px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+.dash-claim-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.dash-claim-ok {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-success);
+}
+
+/* old-links (kill the trail) */
+.dash-links {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border-subtle);
+}
+.dash-links-empty {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.dash-links-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dash-links-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.dash-links-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dash-toolbar {
@@ -1158,17 +1336,124 @@ a.file-chip-name:hover {
     border-top: 1px solid var(--color-border-subtle);
   }
   .how-col:first-child { padding-top: 0; border-top: none; }
-  .signin-hint a { display: none; }
-  .copy-btn,
-  .hint-dismiss,
-  .theme-toggle,
-  .dash-action,
-  .dash-tab {
-    min-height: 44px;
-  }
   .dash-grid { column-width: auto; columns: 1; }
   /* touch: keep actions visible (no hover) */
   .dash-actions { opacity: 1; }
+}
+
+/* Very small phones: the hero headline (serif, 3 lines) must not run past the
+   edge — step it down once more so the longest line fits at ~360px. */
+@media (max-width: 480px) {
+  .hero-title { font-size: 26px; }
+  .landing-main { padding: 0 var(--space-2); }
+  .landing-nav { gap: var(--space-2); }
+  /* the in-page "How it works" anchor is non-essential chrome; drop it on the
+     narrowest phones so "Sign in" + theme toggle keep clear, tappable room */
+  .landing-nav a[href="#how"] { display: none; }
+}
+
+/* ---------- pad-editor topbar at phone widths ---------- */
+/* The slug/copy control and the connection state must stay visible at every
+   width (design spec §2.2); presence collapses to a +N count on its own. The
+   width selector is meaningless on a phone (the canvas fills the viewport), and
+   the user's display name is decorative — both are dropped to make room. */
+@media (max-width: 640px) {
+  .topbar { gap: var(--space-1); }
+  .topbar-left,
+  .topbar-right { gap: var(--space-1); }
+  .width-selector { display: none; }
+  .topbar-user-name { display: none; }
+  .topbar-user { gap: var(--space-1); }
+  .copy-label { max-width: 38vw; }
+  /* connection indicator: drop the fixed reservation and let the (rare)
+     long "view-only" string ellipsize instead of forcing overflow */
+  .conn-indicator { min-width: 0; }
+  .conn {
+    display: inline-block;
+    max-width: 42vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  /* less chrome padding around the writing surface so the column is wider */
+  .pad-layout { padding-left: var(--space-2); padding-right: var(--space-2); }
+  .pad-canvas { padding: var(--space-2); }
+}
+
+/* Hide the brand wordmark on the narrowest phones so the slug has room (it is
+   still reachable — the whole header links home elsewhere, and the slug copy
+   control stays). */
+@media (max-width: 380px) {
+  .topbar .brand-mark { display: none; }
+}
+
+/* ---------- dashboard at phone widths ---------- */
+@media (max-width: 640px) {
+  .dash { padding: var(--space-2); }
+  .dash-header-right { width: 100%; }
+  .dash-search { flex: 1 1 auto; min-width: 0; }
+}
+
+/* ---------- touch targets (any touch device, regardless of width) ---------- */
+/* Per the accessibility spec, every tappable control is ≥44×44px on touch.
+   Desktop-sized icon buttons commonly fall short, so bump them here. Gated on
+   coarse pointers so mouse users keep the compact desktop sizing. */
+@media (pointer: coarse) {
+  .btn,
+  .copy-btn,
+  .claim-btn,
+  .dash-action,
+  .dash-tab,
+  .dash-vis-trigger,
+  .dash-pin-link,
+  .topbar-user .text-link,
+  .pad-state .text-link,
+  .landing-nav a,
+  .landing-footer-links a,
+  .auth-home,
+  .hint-dismiss {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* icon-only / square controls need width too, not just height */
+  .theme-toggle {
+    min-width: 44px;
+    min-height: 44px;
+    width: 44px;
+    height: 44px;
+  }
+  .hint-dismiss { min-width: 44px; }
+  .file-dropzone { min-height: 56px; }
+  .file-chip-remove {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    display: inline-flex;
+    align-items: center;
+  }
+  .dash-vis-option { min-height: 44px; }
+  .dash-card-name-link { display: block; min-height: 44px; }
+  /* Inputs/selects ≥16px so iOS Safari doesn't zoom the viewport on focus. */
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+  /* These carry an explicit small font-size class that out-specifies the bare
+     element rule above, so override them directly (they can be visible on a
+     touch tablet wider than the 640px phone breakpoint). */
+  .width-select,
+  .dash-search,
+  .dash-pin-input,
+  .dash-pin-format,
+  .dash-rename-input {
+    font-size: 16px;
+  }
+  /* Touch: row/card actions are always shown (no hover to reveal them). */
+  .dash-actions { opacity: 1 !important; }
 }
 
 @media (hover: none) {
