@@ -3,11 +3,13 @@ import { Link, useNavigate } from "react-router-dom";
 
 import ThemeToggle from "../components/ThemeToggle";
 import { createPad } from "../api";
+import { useAuth } from "../auth";
 import { useTheme } from "../useTheme";
 
 export default function Landing() {
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
+  const { user, ready } = useAuth();
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,9 +32,16 @@ export default function Landing() {
         <Link to="/" className="wordmark" aria-label="River home">
           River
         </Link>
-        <nav className="landing-nav">
+        <nav className="landing-nav" aria-label="Primary">
           <a href="#how">How it works</a>
-          <Link to="/login">Sign in</Link>
+          {ready && user ? (
+            <>
+              <Link to="/account/pads">My Pads</Link>
+              <Link to="/new">New Pad</Link>
+            </>
+          ) : (
+            <Link to="/login">Sign in</Link>
+          )}
           <ThemeToggle theme={theme} onToggle={toggle} />
         </nav>
       </header>
