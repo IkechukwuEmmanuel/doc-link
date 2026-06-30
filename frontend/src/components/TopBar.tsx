@@ -44,9 +44,7 @@ export default function TopBar({
   onClaim,
 }: Props) {
   const { user, logout } = useAuth();
-  const [hintDismissed, setHintDismissed] = useState(
-    () => localStorage.getItem(dismissKey(slug)) === "1"
-  );
+  const [hintDismissed, setHintDismissed] = useState(false);
   const [widthPreset, setWidthPreset] = useState<WidthPreset>(() => {
     const stored = localStorage.getItem(WIDTH_KEY);
     return (stored as WidthPreset) || "standard";
@@ -59,23 +57,26 @@ export default function TopBar({
   }
 
   function changeWidth(preset: WidthPreset) {
-    setWidthPreset(preset);
-    localStorage.setItem(WIDTH_KEY, preset);
-    document.documentElement.style.setProperty(
-      "--canvas-max-width",
-      `${getWidthValue(preset)}px`
-    );
+    if (["narrow", "standard", "wide"].includes(preset)) {
+      setWidthPreset(preset);
+    }
   }
 
+  // Update hintDismissed when slug changes
   useEffect(() => {
-    const stored = localStorage.getItem(WIDTH_KEY);
-    if (stored) {
+    setHintDismissed(localStorage.getItem(dismissKey(slug)) === "1");
+  }, [slug]);
+  
+  // Apply width setting and save to localStorage when widthPreset changes
+  useEffect(() => {
+    if (["narrow", "standard", "wide"].includes(widthPreset)) {
       document.documentElement.style.setProperty(
         "--canvas-max-width",
-        `${getWidthValue(stored as WidthPreset)}px`
+        `${getWidthValue(widthPreset)}px`
       );
+      localStorage.setItem(WIDTH_KEY, widthPreset);
     }
-  }, []);
+  }, [widthPreset]);
 
   return (
     <header className="topbar">

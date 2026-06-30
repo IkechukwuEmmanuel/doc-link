@@ -71,7 +71,6 @@ export default function Pad() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [padIdentifier, authedFetch]);
 
   // Claiming happens from the dashboard (spec §3). In-pad we only mint a
