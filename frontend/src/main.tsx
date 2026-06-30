@@ -12,6 +12,9 @@ import Pad from "./pages/Pad";
 import ResetPassword from "./pages/ResetPassword";
 import VerifyEmail from "./pages/VerifyEmail";
 import NewPad from "./pages/NewPad";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+import Help from "./pages/Help";
 
 const router = createBrowserRouter([
   { path: "/", element: <Landing /> },
@@ -26,6 +29,9 @@ const router = createBrowserRouter([
   { path: "/:username/new/:customName", element: <NewPad /> },
   { path: "/:username/:padname", element: <Pad /> },
   { path: "/:slug", element: <Pad /> },
+  { path: "/privacy", element: <Privacy /> },
+  { path: "/terms", element: <Terms /> },
+  { path: "/help", element: <Help /> },
 ]);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

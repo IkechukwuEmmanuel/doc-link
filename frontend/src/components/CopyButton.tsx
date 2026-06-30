@@ -14,12 +14,38 @@ export default function CopyButton({ value, label, ariaLabel }: Props) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const copy = useCallback(async () => {
+    const doFallback = (text: string) => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "absolute";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        const sel = document.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(ta);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        const ok = document.execCommand("copy");
+        sel?.removeAllRanges();
+        document.body.removeChild(ta);
+        return ok;
+      } catch {
+        return false;
+      }
+    };
+
     try {
-      await navigator.clipboard.writeText(value);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const ok = doFallback(value);
+        if (!ok) return;
+      }
     } catch {
-      // Clipboard may be unavailable (insecure context); fail silently per
-      // the "ambient, no error modals" principle.
-      return;
+      // If the async clipboard API failed, try the fallback.
+      if (!doFallback(value)) return;
     }
     setCopied(true);
     if (timer.current) clearTimeout(timer.current);

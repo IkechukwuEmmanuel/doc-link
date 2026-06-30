@@ -344,14 +344,14 @@ export default function AccountPads() {
                     placeholder="new-name"
                   />
                 ) : (
-                  <a href={`/${pad.slug}`} className="dash-card-name-link">
+                  <Link to={`/${pad.slug}`} className="dash-card-name-link">
                     {pad.name ? (
                       <div className="dash-name">{pad.name}</div>
                     ) : (
                       <div className="dash-name dash-name--slug">{pad.slug}</div>
                     )}
                     {pad.name && <div className="dash-name-slug">/{pad.slug}</div>}
-                  </a>
+                  </Link>
                 )}
 
                 <div className="dash-card-meta">
@@ -369,11 +369,34 @@ export default function AccountPads() {
                     <button
                       type="button"
                       className="dash-action"
-                      onClick={async () => {
+                      onClick={() => {
                         const url = `${window.location.origin}/${pad.slug}`;
-                        try {
-                          await navigator.clipboard.writeText(url);
-                        } catch {}
+                        const doFallback = (text: string) => {
+                          try {
+                            const ta = document.createElement("textarea");
+                            ta.value = text;
+                            ta.setAttribute("readonly", "");
+                            ta.style.position = "absolute";
+                            ta.style.left = "-9999px";
+                            document.body.appendChild(ta);
+                            const sel = document.getSelection();
+                            const range = document.createRange();
+                            range.selectNodeContents(ta);
+                            sel?.removeAllRanges();
+                            sel?.addRange(range);
+                            const ok = document.execCommand("copy");
+                            sel?.removeAllRanges();
+                            document.body.removeChild(ta);
+                            return ok;
+                          } catch {
+                            return false;
+                          }
+                        };
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                          navigator.clipboard.writeText(url).catch(() => doFallback(url));
+                        } else {
+                          doFallback(url);
+                        }
                       }}
                       aria-label={`Copy link to ${pad.slug}`}
                     >

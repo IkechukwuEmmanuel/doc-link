@@ -140,9 +140,9 @@ export default function Landing() {
         <div className="landing-footer-inner">
           <span className="wordmark wordmark--sm">River</span>
           <nav className="landing-footer-links">
-            <a href="#">Privacy</a>
-            <a href="#">Terms</a>
-            <a href="#">Help</a>
+            <Link to="/privacy">Privacy</Link>
+            <Link to="/terms">Terms</Link>
+            <Link to="/help">Help</Link>
           </nav>
         </div>
       </footer>

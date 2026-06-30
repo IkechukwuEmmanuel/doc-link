@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import { createPad } from "../api";
 import { useAuth } from "../auth";
 
 export default function NewPad() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, authedFetch } = useAuth();
   const { customName } = useParams();
   const [error, setError] = useState<string | null>(null);
 
@@ -13,7 +13,8 @@ export default function NewPad() {
     // Create a pad and redirect to its address.
     // If authenticated, the pad is owned by the user.
     // If a custom name is provided, use it as the pad name.
-    createPad(customName, undefined)
+    // If signed in, use the authenticated fetcher so the pad is owned by the user.
+    createPad(customName, user ? authedFetch : undefined)
       .then((pad) => {
         // Determine the redirect URL based on ownership
         let redirectUrl: string;
@@ -35,7 +36,7 @@ export default function NewPad() {
     return (
       <div className="pad-state">
         <p className="error" role="alert">{error}</p>
-        <a className="text-link" href="/">← Home</a>
+        <Link className="text-link" to="/">← Home</Link>
       </div>
     );
   }
