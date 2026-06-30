@@ -24,12 +24,10 @@ class Settings(BaseSettings):
     def migration_database_url(self) -> str:
         return self.database_url_direct or self.database_url
 
-    # Object storage (S3-compatible; MinIO in local dev). Phase 3.
-    s3_endpoint_url: str = "http://localhost:9000"
-    s3_region: str = "us-east-1"
-    s3_access_key: str = "spacepad"
-    s3_secret_key: str = "spacepadsecret"
-    s3_bucket: str = "spacepad-uploads"
+    # Object storage: Supabase Storage (Phase 3, re-platformed onto Supabase).
+    # Private bucket; access goes through the FastAPI permission layer using the
+    # service-role key (reuses supabase_url / supabase_service_role_key below).
+    supabase_storage_bucket: str = "pad-files"
 
     # Malware scanning (Phase 3). If clamd is unreachable, scanning fails CLOSED:
     # uploads are marked failed and never served. See DECISIONS.md.
@@ -66,14 +64,35 @@ class Settings(BaseSettings):
     def supabase_jwks_url(self) -> str:
         return f"{self.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
 
+    # Whether auth cookies (the refresh-token + PIN-unlock cookies) carry the
+    # ``Secure`` flag. Browsers DROP ``Secure`` cookies received over plain HTTP,
+    # so this must be False whenever the SPA is served over http:// — e.g. a
+    # staging/testing setup where the frontend runs on http://localhost:3000 and
+    # proxies /api to an external HTTPS backend. It is deliberately decoupled from
+    # ``environment`` (which still governs prod-only behaviour like rejecting
+    # legacy HS256 tokens): you can run a production-configured backend behind an
+    # HTTP frontend during testing. Leave unset to derive the safe default from
+    # ``environment`` (Secure everywhere except development).
+    cookie_secure: bool | None = None  # env: COOKIE_SECURE
+
     @property
     def cookies_secure(self) -> bool:
+        if self.cookie_secure is not None:
+            return self.cookie_secure
         return self.environment != "development"
 
     # Rate limiting (Phase 6). Enforced via Redis when reachable; fails open
     # otherwise (see app/services/ratelimit.py). Figures from PRD §5.4.
     rate_limit_enabled: bool = True
     ip_hash_salt: str = "change-me-in-production"
+    # Number of trusted reverse-proxy hops between the public internet and the
+    # app. The rate-limit client IP is read from the X-Forwarded-For chain
+    # accordingly (the entry added by the outermost trusted proxy). 0 (default)
+    # means trust NO forwarded headers and use the direct peer IP — un-spoofable,
+    # the safe default. Production MUST set this to the real hop count (e.g. 1
+    # behind a single load balancer) or clients can forge X-Forwarded-For to mint
+    # fresh rate-limit buckets (AUDIT H1). See PRODUCTION_READINESS.md topology.
+    trusted_proxy_hops: int = 0
     rl_create_per_hour: int = 10
     rl_create_burst_seconds: int = 5
     rl_edit_per_min: int = 60
@@ -91,11 +110,23 @@ class Settings(BaseSettings):
     rl_pin_attempts_per_window: int = 5
     rl_pin_window_seconds: int = 300  # 5 attempts / 5 min / (pad, IP)
 
+    # Pad claim tokens. Time-bound (not single-use): a token can be submitted
+    # repeatedly until it expires; a *successful* claim consumes it. Generating a
+    # new token invalidates any still-live one for that pad (one active per pad).
+    claim_token_ttl_seconds: int = 600  # 10 minutes
+
     # Email delivery (Phase 7). If no provider is configured, transactional
     # emails are logged instead of sent (see app/services/email.py).
-    email_provider: str = ""  # "" => console/log stub
+    email_provider: str = ""  # "" => console/log stub; "smtp" => real SMTP send
     email_from: str = "no-reply@spacepad.app"
     password_reset_ttl_seconds: int = 3600  # 1 hour, single-use (PRD §5.6)
+    # SMTP transport (used when EMAIL_PROVIDER=smtp). Vendor-neutral — works with
+    # SES / Postmark / Mailgun via their SMTP endpoints, so no SDK lock-in.
+    email_smtp_host: str = ""
+    email_smtp_port: int = 587
+    email_smtp_username: str = ""
+    email_smtp_password: str = ""
+    email_smtp_starttls: bool = True
 
     # Upload caps (Phase 3). Kept here as configurable constants, not magic numbers.
     anon_max_files_per_pad: int = 5

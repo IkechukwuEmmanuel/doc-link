@@ -27,7 +27,7 @@ export default function ForgotPassword() {
             link. It expires in 1 hour.
           </p>
         ) : (
-          <form className="auth-card" onSubmit={submit}>
+          <form className="auth-form" onSubmit={submit}>
             <label className="auth-field">
               Email
               <input

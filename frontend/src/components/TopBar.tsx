@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 
+import BrandWordmark from "./BrandWordmark";
 import ConnectionIndicator, { ConnectionState } from "./ConnectionIndicator";
 import CopyButton from "./CopyButton";
 import PresenceStack, { PresencePeer } from "./PresenceStack";
@@ -17,10 +18,10 @@ interface Props {
   onClaim?: () => void;
 }
 
-const dismissKey = (slug: string) => `spacepad-hint-dismissed:${slug}`;
+const dismissKey = (slug: string) => `river-hint-dismissed:${slug}`;
 
 type WidthPreset = "narrow" | "standard" | "wide";
-const WIDTH_KEY = "spacepad-editor-width";
+const WIDTH_KEY = "river-editor-width";
 
 function getWidthValue(preset: WidthPreset): number {
   switch (preset) {
@@ -43,9 +44,7 @@ export default function TopBar({
   onClaim,
 }: Props) {
   const { user, logout } = useAuth();
-  const [hintDismissed, setHintDismissed] = useState(
-    () => localStorage.getItem(dismissKey(slug)) === "1"
-  );
+  const [hintDismissed, setHintDismissed] = useState(false);
   const [widthPreset, setWidthPreset] = useState<WidthPreset>(() => {
     const stored = localStorage.getItem(WIDTH_KEY);
     return (stored as WidthPreset) || "standard";
@@ -58,29 +57,32 @@ export default function TopBar({
   }
 
   function changeWidth(preset: WidthPreset) {
-    setWidthPreset(preset);
-    localStorage.setItem(WIDTH_KEY, preset);
-    document.documentElement.style.setProperty(
-      "--canvas-max-width",
-      `${getWidthValue(preset)}px`
-    );
+    if (["narrow", "standard", "wide"].includes(preset)) {
+      setWidthPreset(preset);
+    }
   }
 
-  useState(() => {
-    const stored = localStorage.getItem(WIDTH_KEY);
-    if (stored) {
+  // Update hintDismissed when slug changes
+  useEffect(() => {
+    setHintDismissed(localStorage.getItem(dismissKey(slug)) === "1");
+  }, [slug]);
+  
+  // Apply width setting and save to localStorage when widthPreset changes
+  useEffect(() => {
+    if (["narrow", "standard", "wide"].includes(widthPreset)) {
       document.documentElement.style.setProperty(
         "--canvas-max-width",
-        `${getWidthValue(stored as WidthPreset)}px`
+        `${getWidthValue(widthPreset)}px`
       );
+      localStorage.setItem(WIDTH_KEY, widthPreset);
     }
-  });
+  }, [widthPreset]);
 
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <Link to="/" className="brand-mark" aria-label="SpacePad home">
-          ✦
+        <Link to="/" className="brand-mark" aria-label="River home">
+          <BrandWordmark />
         </Link>
         <CopyButton value={fullUrl} label={slug} ariaLabel={`Copy pad URL ${slug}`} />
       </div>
@@ -95,7 +97,12 @@ export default function TopBar({
         )}
         {!user && !hintDismissed && (
           <span className="signin-hint">
-            <Link to="/login">Sign in to keep this pad forever</Link>
+            <Link to="/login">
+              {/* Full sentence on desktop; a compact "Sign in" on phones so the
+                  affordance survives without a dangling dismiss button. */}
+              <span className="signin-hint-full">Sign in to keep this pad forever</span>
+              <span className="signin-hint-short">Sign in</span>
+            </Link>
             <button
               type="button"
               className="hint-dismiss"

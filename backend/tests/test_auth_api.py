@@ -85,7 +85,14 @@ async def test_claim_pad_flow(client):
     auth = {"Authorization": f"Bearer {token}"}
     await client.post("/api/pads", json={"slug": "claim-me"})
 
-    claim = await client.post("/api/pads/claim-me/claim", headers=auth)
+    # Claiming is token-gated: generate a token in-pad, then submit with it.
+    gen = await client.post("/api/pads/claim-me/claim-token")
+    assert gen.status_code == 200
+    claim_token = gen.json()["token"]
+
+    claim = await client.post(
+        "/api/pads/claim-me/claim", json={"token": claim_token}, headers=auth
+    )
     assert claim.status_code == 200
     body = claim.json()
     assert body["owner_id"] is not None
@@ -102,12 +109,19 @@ async def test_claim_already_owned_conflicts(client):
     t2 = (await _signup(client, email="two@example.com")).json()["access_token"]
     await client.post("/api/pads", json={"slug": "contested"})
 
+    tok = (await client.post("/api/pads/contested/claim-token")).json()["token"]
     first = await client.post(
-        "/api/pads/contested/claim", headers={"Authorization": f"Bearer {t1}"}
+        "/api/pads/contested/claim",
+        json={"token": tok},
+        headers={"Authorization": f"Bearer {t1}"},
     )
     assert first.status_code == 200
+    # The pad now has an owner — a second claim (even with a fresh attempt) is a
+    # conflict.
     second = await client.post(
-        "/api/pads/contested/claim", headers={"Authorization": f"Bearer {t2}"}
+        "/api/pads/contested/claim",
+        json={"token": tok},
+        headers={"Authorization": f"Bearer {t2}"},
     )
     assert second.status_code == 409
 

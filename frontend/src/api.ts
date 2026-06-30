@@ -20,6 +20,18 @@ export interface Pad {
   // True when the pad is PIN-gated and this requester hasn't unlocked it yet;
   // when set, `content` is withheld (empty) and the locked screen is shown.
   locked: boolean;
+  // Browser-facing canonical address (`/{username}/{name}` or `/{name}` for a
+  // renamed anonymous pad); null when the bar is already canonical. The SPA uses
+  // this to fix the address bar client-side (no HTTP 301).
+  canonical_url: string | null;
+}
+
+export interface Redirect {
+  id: string;
+  old_slug: string;
+  namespace: string;
+  target_url: string;
+  created_at: string;
 }
 
 export interface PadListItem {
@@ -151,6 +163,72 @@ export async function unlockPad(
     return { kind: "rate_limited", message, retryAfter };
   }
   return { kind: "incorrect", message };
+}
+
+// --- Claiming (token-based) -------------------------------------------------
+
+/** Generate a time-bound claim token from inside a pad (any current viewer of
+ *  an unclaimed pad). The token is submitted later from the dashboard. */
+export async function generateClaimToken(
+  slug: string,
+  fetcher: Fetcher = fetch
+): Promise<{ token: string; expires_at: string }> {
+  const resp = await fetcher(
+    `/api/pads/${encodeURIComponent(slug)}/claim-token`,
+    { method: "POST" }
+  );
+  if (!resp.ok) await detailError(resp, "Could not generate a claim token.");
+  return resp.json();
+}
+
+export type ClaimResult =
+  | { kind: "ok"; pad: Pad }
+  | { kind: "error"; status: number; message: string };
+
+/** Submit a claim from the dashboard: the pad's slug (parsed from its URL), the
+ *  claim token, and the PIN if the pad is locked. */
+export async function claimPad(
+  fetcher: Fetcher,
+  slug: string,
+  token: string,
+  pin?: string
+): Promise<ClaimResult> {
+  const resp = await fetcher(`/api/pads/${encodeURIComponent(slug)}/claim`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(pin ? { token, pin } : { token }),
+  });
+  if (resp.ok) return { kind: "ok", pad: await resp.json() };
+  const err = await resp.json().catch(() => ({}));
+  return {
+    kind: "error",
+    status: resp.status,
+    message:
+      typeof err.detail === "string" ? err.detail : "Could not claim that pad.",
+  };
+}
+
+// --- Redirects ("manage old links") -----------------------------------------
+export async function listRedirects(
+  fetcher: Fetcher,
+  slug: string
+): Promise<Redirect[]> {
+  const resp = await fetcher(`/api/pads/${encodeURIComponent(slug)}/redirects`);
+  if (!resp.ok) throw new Error("Failed to load old links.");
+  return resp.json();
+}
+
+export async function killRedirect(
+  fetcher: Fetcher,
+  slug: string,
+  redirectId: string
+): Promise<void> {
+  const resp = await fetcher(
+    `/api/pads/${encodeURIComponent(slug)}/redirects/${redirectId}`,
+    { method: "DELETE" }
+  );
+  if (!resp.ok && resp.status !== 204)
+    await detailError(resp, "Could not remove that old link.");
 }
 
 export async function deletePad(fetcher: Fetcher, slug: string): Promise<void> {

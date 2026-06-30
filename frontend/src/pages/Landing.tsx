@@ -1,75 +1,151 @@
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import ThemeToggle from "../components/ThemeToggle";
 import { createPad } from "../api";
-import { randomExampleSlug } from "../exampleSlug";
+import { useAuth } from "../auth";
 import { useTheme } from "../useTheme";
 
 export default function Landing() {
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
-  const [example, setExample] = useState(randomExampleSlug);
+  const { user, ready } = useAuth();
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const startedRef = useRef(false);
 
-  // Rotate the illustrative example slug gently (ambient, not decorative motion).
-  useEffect(() => {
-    const id = setInterval(() => setExample(randomExampleSlug()), 2500);
-    return () => clearInterval(id);
-  }, []);
-
-  // The element IS the create action: click or first keystroke creates the pad
-  // and transitions continuously, carrying any buffered text into the new pad.
-  async function start(seed: string) {
-    if (startedRef.current) return;
-    startedRef.current = true;
+  async function startPad() {
+    if (creating) return;
     setCreating(true);
     setError(null);
     try {
       const pad = await createPad();
-      navigate(`/${pad.slug}`, { state: { seed } });
+      navigate(`/${pad.slug}`);
     } catch (e) {
-      startedRef.current = false;
       setCreating(false);
       setError((e as Error).message);
     }
   }
 
   return (
-    <main className="landing">
-      <div className="landing-corner">
-        <ThemeToggle theme={theme} onToggle={toggle} />
-      </div>
+    <div className="landing">
+      <header className="landing-header">
+        <Link to="/" className="wordmark" aria-label="River home">
+          River
+        </Link>
+        <nav className="landing-nav" aria-label="Primary">
+          <a href="#how">How it works</a>
+          {ready && user ? (
+            <>
+              <Link to="/account/pads">My Pads</Link>
+              <Link to="/new">New Pad</Link>
+            </>
+          ) : (
+            <Link to="/login">Sign in</Link>
+          )}
+          <ThemeToggle theme={theme} onToggle={toggle} />
+        </nav>
+      </header>
 
-      <div className="landing-center">
-        <textarea
-          ref={inputRef}
-          className="hero-input"
-          aria-label="Start a new pad — type or click to begin"
-          rows={1}
-          spellCheck={false}
-          autoFocus
-          placeholder="Start typing…"
-          onClick={() => start("")}
-          onChange={(e) => start(e.target.value)}
-          disabled={creating}
-        />
-        <p className="hero-example" aria-hidden="true">
-          spacepad.app/<span className="hero-slug">{example}</span>
-        </p>
-        {error && (
-          <p className="error" role="alert">
-            {error}
+      <main className="landing-main">
+        <section className="hero">
+          <p className="hero-eyebrow">Collaborative scratchpad</p>
+          <h1 className="hero-title">
+            Open a page.
+            <br />
+            Start typing.
+            <br />
+            Hand someone the door.
+          </h1>
+          <p className="hero-sub">
+            River is a shared page you can open in a second and write on together
+            in real time. No setup, no documents to manage — just a link.
           </p>
-        )}
-      </div>
+          <div className="hero-cta">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={startPad}
+              disabled={creating}
+            >
+              {creating ? "Opening…" : "Start a pad — it's instant"}
+            </button>
+            <span className="hero-note">No signup required.</span>
+          </div>
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+        </section>
 
-      <a className="landing-login" href="/login">
-        Log in
-      </a>
-    </main>
+        <section className="how" id="how">
+          <div className="how-grid">
+            <div className="how-col">
+              <p className="how-num">01</p>
+              <h3>Open instantly</h3>
+              <p>
+                Hit start and you're writing on a fresh pad — no account, no
+                blank-document ceremony.
+              </p>
+            </div>
+            <div className="how-col">
+              <p className="how-num">02</p>
+              <h3>Write together</h3>
+              <p>
+                Share the link and edits sync live between everyone on the pad,
+                cursors and all.
+              </p>
+            </div>
+            <div className="how-col">
+              <p className="how-num">03</p>
+              <h3>Lock it down</h3>
+              <p>
+                Keep a pad with an account, set a PIN, or make it invite-only when
+                it matters.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="preview-section">
+          <div className="preview-copy">
+            <h2>A page that gets out of the way</h2>
+            <p>
+              Plain text, files, and live cursors on a calm, distraction-free
+              surface. The writing is the interface.
+            </p>
+          </div>
+          <div className="preview-card" aria-hidden="true">
+            <div className="preview-bar">
+              <span className="preview-slug">river.app/quiet-harbor-07</span>
+              <span className="preview-dots">
+                <i />
+                <i />
+                <i />
+              </span>
+            </div>
+            <div className="preview-body">
+              <h4>Sprint notes</h4>
+              <p>— ship the walnut theme</p>
+              <p>— review the editor surface</p>
+              <p>
+                — hand off to design<span className="preview-caret" />
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer className="landing-footer">
+        <div className="landing-footer-inner">
+          <span className="wordmark wordmark--sm">River</span>
+          <nav className="landing-footer-links">
+            <Link to="/privacy">Privacy</Link>
+            <Link to="/terms">Terms</Link>
+            <Link to="/help">Help</Link>
+          </nav>
+        </div>
+      </footer>
+    </div>
   );
 }

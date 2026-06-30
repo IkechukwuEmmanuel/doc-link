@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import secrets
 import string
-import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select

@@ -1,7 +1,6 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +9,8 @@ from app.db.session import get_db
 from app.models.pad import Pad, PinFormat, Visibility
 from app.models.user import User
 from app.schemas.pad import (
+    ClaimIn,
+    ClaimTokenOut,
     CollaboratorIn,
     CollaboratorOut,
     PadCreate,
@@ -18,12 +19,15 @@ from app.schemas.pad import (
     PadPatch,
     PadUpdate,
     PinUnlockIn,
+    RedirectOut,
 )
 from app.services import access as access_service
+from app.services import claim as claim_service
 from app.services import collaborator as collab_service
 from app.services import pad as pad_service
 from app.services import pin as pin_service
 from app.services import ratelimit as ratelimit_service
+from app.services import redirect as redirect_service
 from app.services import slug as slug_service
 from app.services import user as user_service
 
@@ -34,6 +38,10 @@ async def _pad_out(
     db: AsyncSession, pad: Pad, user: User | None, unlock_token: str | None = None
 ) -> PadOut:
     out = PadOut.model_validate(pad)
+    # The canonical address isn't secret — include it on every response (incl.
+    # locked pads, rename, and claim) so the SPA can canonicalize the address bar
+    # right after any operation (AUDIT B4 — no HTTP 301).
+    out.canonical_url = await _canonical_url(db, pad)
     if not await pin_service.has_pin_access(db, pad, user, unlock_token):
         # Withhold content from a locked pad; the frontend renders the PIN screen.
         out.locked = True
@@ -42,6 +50,14 @@ async def _pad_out(
         return out
     out.can_edit = await access_service.can_write_content(db, pad, user)
     return out
+
+
+async def _canonical_url(db: AsyncSession, pad: Pad) -> str | None:
+    """Browser-facing canonical address, or None when the address bar is already
+    canonical (a never-renamed anonymous pad sits at ``/{slug}``). Used to
+    canonicalize the SPA address bar client-side instead of 301-redirecting REST
+    content fetches (AUDIT B4)."""
+    return await redirect_service.canonical_url_for(db, pad)
 
 
 def _require_owner(pad: Pad, user: User) -> None:
@@ -110,77 +126,12 @@ async def create_pad(
             owner_id=user.id if user else None,
         )
     except slug_service.SlugError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
     except pad_service.SlugTakenError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="That slug is already taken."
         )
     return await _pad_out(db, pad, user)
-
-
-@router.get("/{username}/{padname}")
-async def get_owned_pad(
-    username: str,
-    padname: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    user: User | None = Depends(get_optional_user),
-):
-    """Fetch a pad owned by a user, by username and padname.
-    
-    The padname can be either the slug or a custom name. If the padname is a
-    previous custom name (the pad was renamed), redirect to the current name.
-    """
-    from app.models.user import User as UserModel
-    
-    # Look up the owner by username
-    owner = await db.execute(
-        select(UserModel).where(UserModel.username == username.lower())
-    )
-    owner_user = owner.scalar_one_or_none()
-    if owner_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"message": "User not found.", "creatable": False},
-        )
-    
-    # Look up the pad by owner_id and padname
-    from sqlalchemy import or_
-    result = await db.execute(
-        select(Pad).where(
-            (Pad.owner_id == owner_user.id) &
-            ((Pad.slug == padname) | (Pad.name == padname))
-        )
-    )
-    pad = result.scalar_one_or_none()
-    
-    if pad is None:
-        # Check if the padname is a previous name; if so, redirect to the current name
-        result = await db.execute(
-            select(Pad).where(
-                (Pad.owner_id == owner_user.id) &
-                (Pad.previous_names.contains([padname]))
-            )
-        )
-        pad = result.scalar_one_or_none()
-        if pad:
-            # Redirect to the current pad name
-            new_url = f"/api/pads/{username}/{pad.name or pad.slug}"
-            return RedirectResponse(url=new_url, status_code=status.HTTP_301_MOVED_PERMANENTLY)
-        
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"message": "This pad doesn't exist yet.", "creatable": False},
-        )
-    
-    if not await access_service.can_read(db, pad, user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This pad is private. Ask the owner to share it with you.",
-        )
-    await pad_service.touch_last_opened(db, pad)
-    unlock_token = request.cookies.get(pin_service.UNLOCK_COOKIE)
-    return await _pad_out(db, pad, user, unlock_token)
 
 
 @router.get("/{slug}")
@@ -195,10 +146,30 @@ async def get_pad(
     Private pads are 403 to anyone who is not the owner or a collaborator. A
     PIN-protected pad returns 200 with ``locked: true`` and no content until the
     requester presents a valid unlock token (the existence is never hidden).
-    
-    If the pad has been claimed (has an owner), redirect to /{username}/{slug}.
+
+    The pad body is always returned directly (200), even for owned pads — the REST
+    API never 301-redirects content fetches (AUDIT B4). When the pad is owned, the
+    response carries a ``canonical_url`` (``/{username}/{padname}``) so the SPA can
+    canonicalize the browser address bar itself; this keeps programmatic fetches
+    (test client, WS auth, PIN unlock — whose cookie is path-scoped to this slug)
+    working without a redirect.
     """
     pad = await pad_service.get_pad_by_slug(db, slug)
+    if pad is None:
+        # An anonymous pad addressed by its *current* custom name (renamed but
+        # still unclaimed) — the bare route resolves names in the anon pool too.
+        pad = (
+            await db.execute(
+                select(Pad).where(Pad.owner_id.is_(None), Pad.name == slug)
+            )
+        ).scalar_one_or_none()
+    if pad is None:
+        # A historical anonymous name (the pad was renamed, or claimed) still
+        # resolves to its pad — returned directly (200) with canonical_url, never
+        # a 301 (AUDIT B4). The SPA then canonicalizes the address bar.
+        pad = await redirect_service.resolve_redirect(
+            db, slug, namespace=redirect_service.ANONYMOUS
+        )
     if pad is None:
         creatable = True
         try:
@@ -209,25 +180,18 @@ async def get_pad(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"message": "This pad doesn't exist yet.", "creatable": creatable},
         )
-    
-    # Check visibility first, before redirect
+
     if not await access_service.can_read(db, pad, user):
         # 403 (not 404): a private pad is "unlisted", its existence isn't secret.
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This pad is private. Ask the owner to share it with you.",
         )
-    
-    # If the pad has an owner, redirect to the new address
-    if pad.owner_id is not None:
-        owner = await user_service.get_by_id(db, pad.owner_id)
-        if owner:
-            new_url = f"/api/pads/{owner.username}/{pad.name or pad.slug}"
-            return RedirectResponse(url=new_url, status_code=status.HTTP_301_MOVED_PERMANENTLY)
-    
+
     await pad_service.touch_last_opened(db, pad)
     unlock_token = request.cookies.get(pin_service.UNLOCK_COOKIE)
-    return await _pad_out(db, pad, user, unlock_token)
+    out = await _pad_out(db, pad, user, unlock_token)
+    return out
 
 
 @router.put("/{slug}", response_model=PadOut)
@@ -254,18 +218,41 @@ async def update_pad(
 async def patch_pad(
     slug: str,
     body: PadPatch,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_optional_user),
 ):
-    """Owner-only metadata update: rename, visibility, archive/unarchive, PIN."""
+    """Metadata update: rename, visibility, archive/unarchive, PIN.
+
+    Authorization splits on ownership: an *owned* pad is owner-only; an
+    *anonymous* (unclaimed) pad is world-editable — any viewer may rename it or
+    set a PIN — consistent with anonymous pads already being publicly editable
+    and "first valid claim wins". A locked anonymous pad still requires the PIN
+    (a valid unlock token) before it can be changed, so a creator can protect a
+    pad by PIN-locking it first.
+    """
     pad = await pad_service.get_pad_by_slug(db, slug)
     if pad is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pad not found.")
-    _require_owner(pad, user)
+    if pad.owner_id is not None:
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required."
+            )
+        _require_owner(pad, user)
+    else:
+        # Anonymous & unclaimed → world-editable, but gated by the PIN if locked.
+        unlock_token = request.cookies.get(pin_service.UNLOCK_COOKIE)
+        if not await pin_service.has_pin_access(db, pad, user, unlock_token):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This pad is locked. Enter its PIN before changing it.",
+            )
     fields = body.model_dump(exclude_unset=True)
 
-    # PRD §5.6: a pad can only be made private by a verified account.
-    if body.visibility is Visibility.private and not user.email_verified:
+    # PRD §5.6: a pad can only be made private by a verified account (so an
+    # anonymous actor, who has no account, can never set private).
+    if body.visibility is Visibility.private and (user is None or not user.email_verified):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Verify your email address before making a pad private.",
@@ -277,14 +264,27 @@ async def patch_pad(
     effective_pin = fields.get("pin_protected", pad.pin_protected)
     if effective_visibility is Visibility.private and effective_pin:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="A private pad can't also be PIN-protected — private is a stronger gate.",
         )
+
+    # Rename is its own transactional, namespaced, collision-checked operation.
+    if "name" in fields and fields["name"] is not None:
+        try:
+            pad = await pad_service.rename_pad(db, pad, fields["name"])
+        except slug_service.SlugError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+            )
+        except pad_service.NameTakenError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="That name is taken. Try another.",
+            )
 
     pad = await pad_service.update_pad_metadata(
         db,
         pad,
-        name=fields["name"] if "name" in fields else pad_service._UNSET,
         visibility=fields.get("visibility", pad_service._UNSET),
         is_archived=fields.get("is_archived", pad_service._UNSET),
     )
@@ -293,7 +293,7 @@ async def patch_pad(
         if body.pin_protected:
             if not body.pin:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="A PIN is required to enable PIN protection.",
                 )
             pin_format = body.pin_format or PinFormat.numeric
@@ -303,7 +303,7 @@ async def patch_pad(
                 )
             except pin_service.InvalidPinError as exc:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
                 )
         else:
             pad = await pin_service.clear_pin(db, pad)
@@ -326,23 +326,111 @@ async def delete_pad(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/{slug}/claim-token", response_model=ClaimTokenOut)
+async def create_claim_token(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
+    """Generate a time-bound claim token for an unclaimed pad.
+
+    Available to any current viewer of an unclaimed pad (no auth required) —
+    consistent with anonymous pads being world-editable; the token is harmless on
+    its own. A PIN-protected pad still can't be claimed without the PIN (enforced
+    at submission), and an already-owned pad can't be claimed at all (409).
+    """
+    pad = await pad_service.get_pad_by_slug(db, slug)
+    if pad is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pad not found.")
+    if pad.owner_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This pad has already been claimed.",
+        )
+    token, expires_at = await claim_service.generate_token(db, pad)
+    return ClaimTokenOut(token=token, expires_at=expires_at)
+
+
 @router.post("/{slug}/claim", response_model=PadOut)
 async def claim_pad(
+    slug: str,
+    body: ClaimIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Claim an anonymous pad with a token (submitted from the dashboard).
+
+    ``slug`` is the segment the SPA parsed from the pasted pad URL (a slug or the
+    pad's current anonymous name). Requires a valid claim token; for a locked pad,
+    also the PIN (rate-limited, generic error so no token-validity oracle leaks).
+    The PIN persists through the claim (option (b)).
+    """
+    pad = await pad_service.get_anonymous_pad_by_segment(db, slug)
+    if pad is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pad not found.")
+    if pad.owner_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This pad has already been claimed.",
+        )
+
+    if pad.pin_protected:
+        retry_after = await ratelimit_service.check_pin_attempt(str(pad.id), request)
+        if retry_after is not None:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many attempts. Please wait before trying again.",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+    try:
+        pad = await claim_service.claim_with_token(
+            db, pad, token=body.token, owner_id=user.id, pin=body.pin
+        )
+    except claim_service.PadAlreadyOwnedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message)
+    except claim_service.InvalidClaimError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=exc.message
+        )
+    return await _pad_out(db, pad, user)
+
+
+@router.get("/{slug}/redirects", response_model=list[RedirectOut])
+async def list_pad_redirects(
     slug: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Claim ownership of an anonymous, unowned pad (requires auth)."""
+    """Owner-only: list the active historical links pointing at a pad."""
     pad = await pad_service.get_pad_by_slug(db, slug)
     if pad is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pad not found.")
-    try:
-        pad = await pad_service.claim_pad(db, pad, user.id)
-    except pad_service.PadAlreadyOwnedError:
+    _require_owner(pad, user)
+    return [RedirectOut.model_validate(r) for r in await redirect_service.list_for_pad(db, pad.id)]
+
+
+@router.delete("/{slug}/redirects/{redirect_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def kill_pad_redirect(
+    slug: str,
+    redirect_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Owner-only: kill one historical link (frees the name for reuse)."""
+    pad = await pad_service.get_pad_by_slug(db, slug)
+    if pad is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pad not found.")
+    _require_owner(pad, user)
+    killed = await redirect_service.kill_redirect(
+        db, redirect_id=redirect_id, pad_id=pad.id
+    )
+    if not killed:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="This pad already has an owner."
+            status_code=status.HTTP_404_NOT_FOUND, detail="Redirect not found."
         )
-    return await _pad_out(db, pad, user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{slug}/collaborators", response_model=list[CollaboratorOut])
@@ -390,12 +478,12 @@ async def add_collaborator(
         )
     except collab_service.NoSuchUserError:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="No account exists for that email. Inviting new users isn't supported yet.",
         )
     except collab_service.CannotInviteOwnerError:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="You already own this pad.",
         )
     return CollaboratorOut(
@@ -501,3 +589,66 @@ async def get_pad_raw(
             detail="This pad is locked. Enter its PIN to view it.",
         )
     return Response(content=pad.content, media_type="text/plain; charset=utf-8")
+
+
+# NOTE: declared LAST, and namespaced under `/u/` rather than the bare
+# `/{username}/{padname}`, on purpose (AUDIT B3). A two-path-param route at
+# `/api/pads/{username}/{padname}` shadows the literal sub-routes above
+# (`/{slug}/raw`, `/{slug}/collaborators`, `/{slug}/unlock`, `/{slug}/files`, …)
+# because Starlette matches in declaration order. Pure reordering helps but still
+# leaves a real ambiguity: `raw`/`new` are reserved slugs, but `collaborators`,
+# `files`, `unlock`, and `claim` are NOT — a pad slug/name could legitimately be
+# one of those, and the literal route would then swallow `/{username}/<that>`.
+# The `/u/` prefix removes the ambiguity entirely. The browser-facing URL scheme
+# (`/{username}/{padname}`) is unaffected — that is served by the SPA, not this
+# REST route. See DECISIONS.md.
+@router.get("/u/{username}/{padname}")
+async def get_owned_pad(
+    username: str,
+    padname: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
+    """Fetch an owned pad by username + padname (slug or custom name).
+
+    Like ``GET /{slug}``, this returns the pad body directly (200) — never a 301
+    (AUDIT B4). When the pad is reached via a *previous* name (it was renamed),
+    the response still returns the current content and carries ``canonical_url``
+    pointing at the current name, so the SPA can update the address bar itself.
+    """
+    owner = await user_service.get_by_username(db, username)
+    if owner is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "User not found.", "creatable": False},
+        )
+
+    result = await db.execute(
+        select(Pad).where(
+            (Pad.owner_id == owner.id)
+            & ((Pad.slug == padname) | (Pad.name == padname))
+        )
+    )
+    pad = result.scalar_one_or_none()
+    if pad is None:
+        # Fall back to a previous name (renamed pad) via the redirects table —
+        # scoped to this owner's namespace — and serve directly (200 + canonical).
+        pad = await redirect_service.resolve_redirect(
+            db, padname, namespace=redirect_service.CLAIMED, namespace_owner=owner.id
+        )
+    if pad is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "This pad doesn't exist yet.", "creatable": False},
+        )
+
+    if not await access_service.can_read(db, pad, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This pad is private. Ask the owner to share it with you.",
+        )
+    await pad_service.touch_last_opened(db, pad)
+    unlock_token = request.cookies.get(pin_service.UNLOCK_COOKIE)
+    out = await _pad_out(db, pad, user, unlock_token)
+    return out

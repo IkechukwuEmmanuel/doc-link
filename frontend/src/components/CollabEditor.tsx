@@ -37,7 +37,7 @@ const ANIMALS = [
 
 function localUser(): AwarenessUser {
   // Stable per browser session so reloads keep the same identity/color.
-  const KEY = "spacepad-identity";
+  const KEY = "river-identity";
   const stored = sessionStorage.getItem(KEY);
   if (stored) return JSON.parse(stored) as AwarenessUser;
   const colorIndex = Math.floor(Math.random() * 10);

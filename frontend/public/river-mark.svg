@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="River">
+  <title>River</title>
+  <!-- Square / favicon variant: capital R from the same serif and ink, on a
+       walnut-paper (--bg, light) rounded tile so it stays legible on any browser
+       tab background. Swap the rect fill for "none" if a transparent mark is wanted. -->
+  <rect width="64" height="64" rx="12" fill="#f7f5f2"/>
+  <text x="32" y="47" text-anchor="middle"
+        font-family="Georgia, 'Source Serif 4', 'Lora', 'Times New Roman', serif"
+        font-size="44" font-weight="400"
+        fill="#34302c">R</text>
+</svg>

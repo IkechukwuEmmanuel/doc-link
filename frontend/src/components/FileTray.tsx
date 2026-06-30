@@ -87,7 +87,7 @@ export default function FileTray({ slug }: Props) {
           }}
         />
         <span className="file-dropzone-label">
-          {busy ? "Uploading…" : "Drop files here or click to attach"}
+          {busy ? "Uploading…" : "Tap to add files, or drop them here"}
         </span>
       </div>
 

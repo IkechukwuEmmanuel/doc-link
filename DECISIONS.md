@@ -10,6 +10,55 @@ ambiguities are resolved toward the simplest, most boring, production-safe optio
 
 ---
 
+## 2026-06-28 — River UI overhaul (brand + visual system)
+
+**Rename → River (user-facing) → Rationale**
+- Context: The product is being rebranded for user-facing copy only; internal
+  identifiers and package names remain unchanged where risky to rename.
+- Decision: All user-visible instances of the product name are `River` (titles,
+  emails, meta tags, aria-labels, wordmarks). Internal names (package.json,
+  DB table names) are left as-is to avoid deployment/CI risk.
+
+**Single-palette walnut-ink → Rationale**
+- Context: Prior five-theme experiment (oxidized-copper, storm-slate, etc.) was
+  judged too exploratory and inconsistent.
+- Decision: The frontend ships a single desaturated walnut palette with light
+  and dark variants. The five-theme picker is cancelled; theme UI reduced to a
+  light/dark toggle. This is implemented via `frontend/src/styles/tokens.css`.
+
+**Typography — serif headlines**
+- Context: Headings previously used the UI sans. The design brief requested a
+  serif editorial tone for headings while keeping sans for body text.
+- Decision: Headings use a serif stack (Georgia / Source Serif 4 / Lora); body
+  and UI text remain Inter (variable). Implemented in `src/styles/tokens.css`
+  and `src/index.css`.
+
+**Elevation system — canvas & cards**
+- Context: The UI was judged visually flat with insufficient surface hierarchy.
+- Decision: Introduce `--color-surface-raised`, `--shadow-card`, and a small
+  border for cards, topbars, and editor canvas. Buttons gain a filled primary
+  state. Implemented across `src/index.css` and component styles.
+
+**Dashboard — Keep-style card grid**
+- Context: The prior decision in Design tracked a table-based dashboard. The
+  visual overhaul mandates a masonry/grid of raised cards (Google Keep-style)
+  for better scannability and rhythm.
+- Decision: Replace the table with a responsive card-grid (`.dash-grid` and
+  `.dash-card`) that retains existing inline controls and accessibility
+  behaviors. `frontend/src/pages/AccountPads.tsx` was updated to render cards.
+
+**Safe-area insets (notched devices)**
+- Context: The overhaul's mobile audit required safe-area handling, which was
+  missing — the viewport meta lacked `viewport-fit=cover` and no element used
+  `env(safe-area-inset-*)`.
+- Decision: Added `viewport-fit=cover` to the viewport meta and applied
+  `env(safe-area-inset-*)` (via `max()` so existing padding is the floor) to the
+  edge-touching elements: `.topbar` (top/sides — its height grows by the top
+  inset so contents stay below the notch), `.landing-header` (top/sides),
+  `.landing-footer-inner` (bottom/sides), and `.pad-layout` (bottom/sides, to
+  keep the file tray clear of the home indicator).
+
+
 ## Infrastructure & tooling
 
 **Local stack via Docker Compose.** Postgres 16, Redis 7, and MinIO (S3-compatible)
@@ -477,4 +526,308 @@ end-to-end coverage; flagged so test/prod divergence is acknowledged, not silent
   renaming necessarily changes the address. This is a deliberate pivot from the original spec,
   not an oversight. The redirect logic ensures old links continue to work, and tests verify
   the redirect behavior.
+
+## 2026-06-28 — Production-readiness pass (audit fixes + deployment)
+
+Driven by `AUDIT.md` (5 blockers + highs/mediums/lows) and a broader deployment-readiness
+effort. Running status lives in `PRODUCTION_READINESS.md`. Judgment calls below.
+
+### B4 — REST API no longer 301-redirects owned pads (SUPERSEDES the prior "301 redirect" decision)
+- The "URL Scheme & Usernames" section above made `GET /api/pads/{slug}` issue a `301` to
+  `/api/pads/{username}/{padname}` for any owned pad, and `GET /{username}/{padname}` issue a
+  `301` on rename. **That is reversed at the API layer.** Both endpoints now return the pad
+  body directly (`200`).
+- **Why:** the redirect broke shipped behavior — (1) many API consumers (incl. the test
+  client) don't auto-follow redirects, so owner/collaborator fetches `assert 200` failed; and
+  (2) the PIN unlock cookie is path-scoped to `/api/pads/{slug}`, so it was never sent to the
+  `/{username}/...` redirect target → PIN unlock "forgot" immediately.
+- **Replacement:** browser-URL canonicalization is now a **frontend** concern. The `200`
+  response carries a `canonical_url` field (`/{username}/{padname}`, or the current name when
+  reached via a `previous_names` entry); the SPA updates the address bar itself. Content
+  fetches (REST, WS auth, PIN unlock) never depend on an HTTP redirect. The browser-facing URL
+  scheme (`/{slug}`, `/{username}/{padname}`, `/new` family) is unchanged.
+
+### B3 — owned-pad route namespaced to `/u/{username}/{padname}` (departure from "pure reorder")
+- The two-path-param route was registered before the literal `/{slug}/raw`,
+  `/{slug}/collaborators`, `/{slug}/files`, … routes and, because Starlette matches in
+  declaration order, shadowed them (a two-segment GET was always captured by username/padname).
+- The audit's first-choice fix is to declare literal routes first. I did that **and** moved the
+  route under `/u/`. **Why depart from pure reorder:** `raw`/`new` are reserved slugs, but
+  `collaborators`, `files`, `unlock`, `claim` are **not** — a pad's slug or custom name could
+  legitimately be one of them, and a literal sub-route would then swallow
+  `/{username}/<that-name>`. The `/u/` prefix removes the ambiguity entirely. The SPA does not
+  call this REST route directly, and the browser URL scheme is unaffected (served by the SPA).
+
+### B5 — file endpoints reuse the central authz (no parallel logic)
+- All four file routes (`upload`/`list`/`download`/`delete`) now thread the requester through
+  `services/access.py` (`can_read` for list/download, `can_write_content` for upload/delete)
+  **and** `services/pin.py` (`has_pin_access`), mirroring the REST pad-content and WS handlers
+  exactly — closing the IDOR where any slug-knower could read/write/delete attachments on a
+  private or PIN-protected pad. Covered by `tests/test_files_authz.py`.
+
+### M1 / M2 — streaming uploads + auth-tier caps
+- `file.create_file` now streams the upload in 1 MiB chunks and aborts at the per-file /
+  remaining-total cutoff instead of buffering the whole body before the size check.
+- `_caps(user)` branches on authentication: authenticated owners get the `auth_*` caps that
+  were previously dead config; anonymous uploads keep the stricter `anon_*` caps.
+
+### H1 — trusted-proxy client IP (`trusted_proxy_hops`)
+- `ratelimit.client_ip()` no longer trusts the left-most `X-Forwarded-For` value. New setting
+  `TRUSTED_PROXY_HOPS` (default **0** = ignore the header, use the un-spoofable peer IP). With
+  N>0 it reads `parts[-N]` (the entry added by the outermost trusted proxy), ignoring any
+  forged prefix a client tacks on. **Production must set this to the real hop count** (e.g. 1
+  behind a single LB) — this is a hard dependency on the deployment topology (Part B / B3).
+  Covered by `tests/test_client_ip.py`.
+
+### H2 — Supabase profile mirror uses the chosen username; collisions get a suffix
+- `_profile_from_gotrue` now passes `user_metadata.username` (the name chosen at signup, stored
+  in gotrue's `data`) to `upsert_profile` instead of deriving one from the email local-part.
+- On a username collision, `upsert_profile` appends a numeric suffix (`name-2`, `name-3`, …)
+  rather than returning `None` and 500ing via `UserOut.model_validate(None)`. **Chose
+  auto-suffix over surfacing an error** because the signup flow already enforces username
+  uniqueness up front; this path is defensive (e.g. derived-username clashes for OAuth), where
+  silently producing a valid unique handle is the better UX than a hard failure. Email
+  local-parts are sanitized to the allowed charset. Covered by `tests/test_user_profile.py`.
+
+### B6 — email: real SMTP implemented (vendor-neutral); legacy path is the non-Supabase fallback
+- **Reachability:** in the Supabase production deployment, every auth route returns via the
+  gotrue branch (`supabase_auth.client is not None`) before reaching `send_email`, so gotrue
+  sends all transactional mail. The module-level `send_email` is the delivery path for the
+  *legacy* (non-Supabase) flow only — the test harness and any self-hosted deployment without
+  Supabase configured. It is therefore **not dead code**, so it was implemented rather than
+  removed.
+- **Choice:** implemented an SMTP transport (`EMAIL_PROVIDER=smtp`, `EMAIL_SMTP_*`) run via a
+  worker thread. SMTP is vendor-neutral (Postmark/SES/Mailgun all expose it) → no SDK lock-in.
+  The log-stub remains for dev (`EMAIL_PROVIDER=""`). Covered by `tests/test_email_service.py`.
+
+### B1 / B2 — Alembic: merged the two heads, applied to the live DB
+- Created merge revision `340f7a3d4015` joining branch A (`c3d4e5f6a7b8`, pads.name index) and
+  branch B (`g2h3i4j5k6l7` username → `h3i4j5k6l7m8` previous_names). `alembic heads` → one head.
+- **Applied to the live Supabase DB via the Supabase MCP** (no `.env`/direct connection string
+  is present in this environment, so a local `alembic upgrade` would target localhost, not
+  prod). The MCP migration ran exactly the branch-B DDL (add `users.username` + unique index;
+  add `pads.previous_names`) and advanced `alembic_version` to the merge head — identical net
+  effect to `alembic upgrade head`. Confirmed by direct schema inspection.
+- **Backup posture:** the live DB had **0 rows in every table** (verified before the change), so
+  the additive migration carried no data-loss risk; the pre-change state (`alembic_version =
+  c3d4e5f6a7b8`, empty tables) is the recovery point, backed by Supabase PITR. The same graph
+  was independently verified by a full `alembic upgrade head` against throwaway Postgres (also
+  wired into CI).
+
+### H3 — RLS / PostgREST exposure decision
+- **PostgREST (Data API) is reachable** (the advisor reports `rls_auto_enable` callable via
+  `/rest/v1/rpc/...`). However, all `public` tables have **RLS enabled with no policies**, which
+  for the `anon`/`authenticated` PostgREST roles means **deny-all** — so application data is
+  *not* exposed via the Data API. This is the safe default, not the "zero protection" the audit
+  feared: that phrasing applies to RLS-bypassing roles (the app's pooler role), not the exposed
+  anon path. **Decision:** keep RLS deny-all (no permissive policies are written — the app does
+  not use the Data API; all access control lives in the FastAPI layer, per the existing
+  Supabase architecture decision). **Recommended hardening (left to ops):** disable the Data API
+  entirely in project settings, since the app never uses it.
+- **Applied via MCP:** revoked `EXECUTE` on the `SECURITY DEFINER` `public.rls_auto_enable()`
+  from `PUBLIC`/`anon`/`authenticated` (it's an event-trigger helper, never meant to be RPC-
+  callable; the event trigger still fires it internally). Both SECURITY DEFINER advisor WARNs
+  cleared.
+- **Leaked-password protection** (advisor WARN) requires the Supabase Auth dashboard toggle and
+  cannot be set via MCP — flagged as a required pre-launch ops action in `PRODUCTION_READINESS.md`.
+
+### M3 — production env flags
+- `ENVIRONMENT` must be non-`development` so `cookies_secure` sets `Secure` on refresh/PIN/PKCE
+  cookies; `JWT_SECRET`, `IP_HASH_SALT` (and the SMTP/Supabase secrets) must be rotated off the
+  `change-me`/placeholder defaults. This is deployment config, not code — tracked as an explicit
+  ops verification checklist in `PRODUCTION_READINESS.md` (cannot be confirmed from the repo).
+
+### Part B — deployment artifacts
+- **Containerization:** added a multi-stage backend `Dockerfile` (non-root, prod uvicorn,
+  `--proxy-headers`) and a frontend `Dockerfile` (Vite build → nginx, SPA fallback + `/api` WS
+  proxy). Both build and serve (verified locally). **Single-process backend constraint:** CRDT
+  rooms are in-memory per process, so the image runs `--workers 1`; horizontal scaling needs a
+  shared Y store / sticky routing first (documented in the Dockerfile + readiness doc).
+- **CI:** `.github/workflows/ci.yml` runs ruff + pytest + a single-Alembic-head check + frontend
+  build, plus a **migration dry-run against throwaway Postgres** (the check that would have
+  caught the B1/B2 drift automatically).
+- **Observability:** added `/health/ready` (DB-connectivity readiness, 503 on failure) distinct
+  from `/health` (liveness); consistent leveled logging to stdout. Error tracking (Sentry):
+  recommended but deferred — see readiness doc.
+- **Load sanity check:** 100 concurrent CRDT WS handshakes against one dev process → 88 OK,
+  p95 ~1.1 s, `/health` stayed 200 throughout; ~12% timed out under the instantaneous burst.
+  Honest signal that a dedicated load test is needed before the PRD's 10k-connection target.
+- **L4 (tech debt):** the legacy direct-Google-OAuth path still lacks an OAuth `state` param;
+  noted as accepted tech debt — the production path is Supabase PKCE (S256), which is fine.
+  Remaining httpx `cookies=` test deprecation also accepted (test-only).
+
+## 2026-06-28 — File storage moved to Supabase Storage (REVERSES the Supabase-migration carve-out)
+
+- **Reverses** the explicit decision logged above in the Supabase-migration section
+  ("What deliberately did NOT change … File storage/scanning (`aioboto3` + `clamd`) is **not**
+  moving to Supabase Storage in this phase"). The *scanning* half is unchanged; only the
+  physical byte store moves.
+- **Why now:** the project is already on Supabase for database and auth, and we don't want a
+  second storage provider (MinIO/S3) to provision, secure, and operate. Consolidating onto
+  Supabase Storage removes the `S3_*` credentials/endpoint surface entirely.
+- **How:** `app/services/storage.py` is re-implemented as a thin httpx wrapper over the
+  Supabase Storage REST API (same pattern as `supabase_auth.py`), authenticating with the
+  service-role key. The **public interface is unchanged** (`ensure_bucket` / `put_object` /
+  `get_object` / `delete_object`), so file routes, access control, cap enforcement, and the
+  malware-scan flow are untouched — this is a swap behind the interface, not a rewrite.
+- **Bucket:** a **private** bucket `pad-files` (created via migration in `storage.buckets`,
+  `public=false`). Access still goes through FastAPI's own permission checks (the bucket is
+  never served via a public URL); the service-role key bypasses storage RLS so authorization
+  remains entirely in the app layer — consistent with the H3 "all access control in FastAPI"
+  decision.
+- **Config:** removed `S3_ENDPOINT_URL/REGION/ACCESS_KEY/SECRET_KEY/BUCKET`; added
+  `SUPABASE_STORAGE_BUCKET` (default `pad-files`), reusing the existing `SUPABASE_URL` /
+  `SUPABASE_SERVICE_ROLE_KEY`. Dropped the now-unused `aioboto3` dependency and the MinIO
+  service/volume from `docker-compose.yml`.
+- **Tests:** the `fake_storage_and_scan` fixture monkeypatches the storage module's functions,
+  so it substitutes for real calls regardless of the backend (no MinIO and no live Supabase
+  needed in tests; nothing skipped). Added `tests/test_storage.py` for the not-found handling.
+  Full suite: 135 passed.
+- **Live verification (done):** ran a real put→get(verify bytes)→delete→confirm-gone→idempotent-
+  re-delete round-trip against the live `pad-files` bucket with the service-role key — all steps
+  passed. This surfaced a real quirk now handled: Supabase's single-object `DELETE` returns HTTP
+  **400** with `{"statusCode":"404","error":"not_found"}` in the body (not an HTTP 404) for a
+  missing object, so `delete_object` treats that body shape as 'already gone' to keep deletion
+  idempotent (matching the old S3 behavior callers rely on).
+
+## 2026-06-28 — Signup form was missing the required `username` field (frontend/backend mismatch)
+
+- **Bug:** the backend `SignupIn` schema gained a required `username` field as part of the
+  username/URL-scheme work, but the frontend signup form (`AuthPage.tsx`) and the `signup()`
+  helper (`auth.tsx`) were never updated — they only sent `email`/`password`/`display_name`. So
+  **every signup 422'd** with `{"loc":["body","username"],"msg":"Field required"}`. This is a
+  classic frontend/backend mismatch: the server contract changed and the client form wasn't
+  updated in lockstep. **Lesson for future schema changes: when adding/changing a required
+  request field, grep the frontend for the corresponding form + request builder and update both
+  in the same change (and ideally add an e2e signup check).**
+- **Fix:** added a **Username** input to the signup form (kept `display_name`, which is still
+  used to render the user in the dashboard + top bar — `user.display_name || user.email`); the
+  `signup()` helper now sends `username`. Client-side validation **mirrors the server rules**
+  (`app/services/username.py` + `RESERVED_SLUGS`): 3–40 chars, lowercase
+  `[a-z0-9_-]`, start/end alphanumeric, no consecutive hyphens, reserved-word exclusion — so the
+  user gets inline feedback instead of a 422. Input is lower-cased as typed (usernames are stored
+  normalized) and the field is labelled with a hint ("This becomes your pad address:
+  yourname/padname"). `readError` now also surfaces FastAPI list-style validation messages.
+- **Verified end-to-end against the deployed Render backend:** a signup *with* username returned
+  **202** ("confirm your email" — the project requires email confirmation; the 422 is gone),
+  while the control *without* username still returned **422**. The throwaway test user was
+  deleted from `auth.users` afterward (no `public.users` row is created until a session exists).
+- **Note (out of scope, flagged):** on the Supabase signup path the backend enforces only the
+  Pydantic length bounds on `username` (3–40), not the full regex/reserved-word check that the
+  legacy `create_user` path runs via `username_service.validate_username`. Client-side validation
+  now covers this for the UI, but server-side enforcement on the Supabase path is a separate
+  hardening follow-up if stricter guarantees are wanted.
+
+## 2026-06-29 — Mobile & small-screen optimization pass
+
+Frontend-only, additive (no backend/API/contract changes). Full design-track
+rationale and the per-screen breakdown live in `DESIGN_DECISIONS.md`
+(§"Mobile & small-screen optimization pass"); verification + its limits are in
+`PRODUCTION_READINESS.md` (§"Mobile optimization"). Judgment calls captured here:
+
+- **Touch-target floor gated on `pointer: coarse`, not viewport width.** A touch
+  tablet at 800px still needs 44px targets, and a narrow desktop window does not —
+  so the 44px bumps are keyed to the input modality, matching the spec's "on touch
+  devices" wording rather than a width breakpoint.
+- **Width selector hidden on phones rather than restricted.** The editor width
+  presets are decorative (`min(100%, --canvas-max-width)` already makes the canvas
+  fill a narrow viewport), so offering Narrow/Standard/Wide on a phone is
+  meaningless; the control is hidden ≤640px instead of pruning its options.
+- **`overflow-x: hidden` on `html, body` as a safety net** *in addition to* fixing
+  the real overflow sources (shrinkable topbar columns, truncating slug label,
+  width-capped remote-cursor flags). The net is intentional defence-in-depth, not a
+  substitute for the targeted fixes.
+- **Discrepancies between older documented designs and the shipped code were logged,
+  not silently rebuilt:** the hidden formatting panel is not wired up; the editor's
+  file panel is always stacked (never side-by-side); the homepage is a marketing
+  page (no central typing element / theme rotation); several documented dashboard
+  inline controls aren't rendered. Re-adding any of these would be new scope, not a
+  mobile fix, so this pass optimized what actually ships and recorded the gaps. See
+  `DESIGN_DECISIONS.md` for specifics.
+- **No backend or test changes.** This pass touches only frontend CSS/TSX; the
+  Python suite and API are untouched, so no new server tests were added.
+
+## 2026-06-29 — Pad naming / claiming / redirect system (Path A)
+
+Implements the rename/claim/redirect spec **adapted onto the existing model**
+(Path A, confirmed with the requester) rather than the spec's literal schema.
+The immutable global `pads.slug` and the AUDIT B3/B4 decisions are untouched.
+
+### Model mapping (spec → shipped)
+- **Immutable slug, mutable name.** `pads.slug` stays the global-unique, immutable
+  id; the canonical *address* is the mutable `pads.name`. Renaming changes `name`,
+  never `slug` (so the slug always keeps resolving — that's why claimed/renamed
+  pads still load by their original `/{slug}`).
+- **`redirects` table replaces `previous_names` JSON.** A real table gives
+  per-entry "kill the trail", `created_at`, and DB-enforced uniqueness the JSON
+  array couldn't. Two namespaces via two **partial unique indexes**
+  (`uq_redirect_anon_active` on `old_slug WHERE active AND namespace='anonymous'`;
+  `uq_redirect_claimed_active` on `(namespace_owner, old_slug) WHERE active AND
+  namespace='claimed'`) — a single index can't enforce the anonymous pool because
+  `namespace_owner` is NULL there and NULLs are distinct in a unique index
+  (verified against real Postgres). `services/redirect.py` owns resolution,
+  namespaced uniqueness, and the "point every redirect at the current canonical,
+  never chain" bookkeeping.
+- **`claim_tokens` table layered on the existing claim endpoint.**
+  `POST /api/pads/{slug}/claim-token` mints a time-bound token (10 min,
+  `claim_token_ttl_seconds`, one active per pad); the existing
+  `POST /api/pads/{slug}/claim` now requires `{token, pin?}` and is driven from
+  the dashboard form. `services/claim.py` does the transfer.
+- **Redirect resolution is NOT a 301 (B4 preserved).** Old names resolve to the
+  live pad and return `200` + `canonical_url`; the SPA canonicalizes the address
+  bar (`history.replaceState`). `canonical_url` is now computed in `_pad_out` so
+  every response (load, rename, claim) carries it.
+- **Rename backstop indexes on `pads.name`** (`uq_pad_anon_name`,
+  `uq_pad_owner_name`, both partial, NULLs excluded) catch concurrent same-name
+  renames; the app-level `is_name_available` check is the fast-path UX. Name-vs-
+  slug collisions (which no single index spans) are caught by the app check.
+
+### Judgment calls
+- **Custom name must be URL-safe (validated like a slug).** Since the name is now
+  the address segment, `rename_pad` validates it with `slug_service.validate_custom_slug`
+  (3–40, lowercase, hyphens, reserved-word-excluded). This **changes prior rename
+  behavior** (free-form names like "My Project" are now rejected); the existing
+  rename test was updated to "my-project". Consistent with the existing "custom
+  name is the actual address" decision and keeps `new`/`raw`/etc. from becoming
+  pad names that break routing.
+- **Reject-on-collision, never auto-suffix** for pad names (409 "That name is
+  taken."). **The H2 username auto-suffix in `services/user.py` is untouched** —
+  different namespace, different failure mode (background gotrue mirror that must
+  not 500). Confirmed with the requester.
+- **PIN persists through claim (option b).** `claim_with_token` leaves
+  `pin_protected`/`pin_hash` intact; the claimer proves the PIN at claim time
+  (rate-limited via the existing `check_pin_attempt`, generic error so there's no
+  token-validity oracle). The private⊕pin_protected mutual exclusion is untouched
+  because a claim never sets `private`.
+- **Anonymous pads became renameable/PIN-settable by extending PATCH.** The
+  endpoint was owner-only, so anonymous (ownerless, world-editable) pads had *no*
+  management path. `patch_pad` now splits authorization: owned → owner-only;
+  anonymous → any caller, but gated by the PIN if the pad is locked (`has_pin_access`).
+  This is what makes "a creator protects a pad by PIN-locking it first" real, per
+  the requester's anonymous-owner resolution. `private` still requires a verified
+  account (so an anonymous actor can never set it).
+- **Single-winner claim enforced at the SQL layer.** Ownership transfer is an
+  atomic `UPDATE pads … WHERE owner_id IS NULL`; token consumption an atomic
+  `UPDATE claim_tokens … WHERE consumed=false AND expires_at>now` (re-checks expiry
+  inside the transaction). A failed claim (wrong PIN) never consumes the token
+  ("not single-use"); a successful one does.
+- **Redirect management is owner-only.** `GET/DELETE /api/pads/{slug}/redirects[/{id}]`
+  require ownership — "kill the trail" is a privacy control for claimed pads.
+  Anonymous-pad redirect management is intentionally not exposed (privacy is moot
+  for world-editable pads).
+
+### Migration & data safety
+- New revision `i9j0k1l2m3n4` (head; `alembic heads` is single). Read-only §8
+  checks against the **live DB** before any DDL: 8 pads / 1 user, **0 duplicate
+  slugs, 0 duplicate (owner,name), 0 null slugs, 0 pads with previous_names** — so
+  the additive tables + name indexes are safe and there's nothing to backfill.
+- **Validated against real throwaway Postgres 16**, not just the SQLite harness:
+  `upgrade head` and `downgrade base` both succeed; on a fresh DB the two tables,
+  all five partial indexes, and the `previous_names` drop are present; the anon
+  partial unique index was shown to reject a duplicate (the NULL-owner concern).
+- **NOT auto-applied to production.** The live DB now holds real rows and the
+  migration drops a column, so applying it is a gated deploy step requiring a
+  manual snapshot first (which can't be taken from this environment). Surfaced in
+  `PRODUCTION_READINESS.md` as a required ops action, mirroring the project's
+  snapshot-before-DDL rule — not applied silently.
 

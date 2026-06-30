@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 type Theme = "light" | "dark";
-const STORAGE_KEY = "spacepad-theme";
+const STORAGE_KEY = "river-theme";
 
 function systemTheme(): Theme {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";

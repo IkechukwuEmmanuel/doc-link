@@ -25,24 +25,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # MinIO (S3-compatible) — used starting Phase 3. Defined now so infra is stable.
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: spacepad
-      MINIO_ROOT_PASSWORD: spacepadsecret
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - miniodata:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   # ClamAV malware scanner — Phase 3. Optional/heavy (~1GB virus DB), so it's
   # behind the "scan" profile and off by default. Without it, the scan service
   # fails closed (uploads marked failed, never served). Enable with:
@@ -64,5 +46,4 @@ services:
 
 volumes:
   pgdata:
-  miniodata:
   clamavdb:
