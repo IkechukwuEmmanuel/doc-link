@@ -67,7 +67,7 @@ export default function TopBar({
     );
   }
 
-  useState(() => {
+  useEffect(() => {
     const stored = localStorage.getItem(WIDTH_KEY);
     if (stored) {
       document.documentElement.style.setProperty(
@@ -75,7 +75,7 @@ export default function TopBar({
         `${getWidthValue(stored as WidthPreset)}px`
       );
     }
-  });
+  }, []);
 
   return (
     <header className="topbar">
