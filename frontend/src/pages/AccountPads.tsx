@@ -344,7 +344,7 @@ export default function AccountPads() {
                     placeholder="new-name"
                   />
                 ) : (
-                  <Link to={`/${pad.slug}`} className="dash-card-name-link">
+                  <Link to={`/${user.username}/${pad.name || pad.slug}`} className="dash-card-name-link">
                     {pad.name ? (
                       <div className="dash-name">{pad.name}</div>
                     ) : (
@@ -370,7 +370,7 @@ export default function AccountPads() {
                       type="button"
                       className="dash-action"
                       onClick={() => {
-                        const url = `${window.location.origin}/${pad.slug}`;
+                        const url = `${window.location.origin}/${user.username}/${pad.name || pad.slug}`;
                         const doFallback = (text: string) => {
                           try {
                             const ta = document.createElement("textarea");
@@ -405,7 +405,7 @@ export default function AccountPads() {
                     <button
                       type="button"
                       className="dash-action"
-                      onClick={() => navigate(`/${pad.slug}`)}
+                      onClick={() => navigate(`/${user.username}/${pad.name || pad.slug}`)}
                     >
                       Open
                     </button>
