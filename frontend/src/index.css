@@ -127,6 +127,8 @@ h1, h2, h3 {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .landing-nav a {
   color: var(--color-text-secondary);
@@ -1347,9 +1349,15 @@ a.file-chip-name:hover {
   .hero-title { font-size: 26px; }
   .landing-main { padding: 0 var(--space-2); }
   .landing-nav { gap: var(--space-2); }
-  /* the in-page "How it works" anchor is non-essential chrome; drop it on the
-     narrowest phones so "Sign in" + theme toggle keep clear, tappable room */
   .landing-nav a[href="#how"] { display: none; }
+  .landing-nav a[href="/login"],
+  .landing-nav a[href="/account/pads"],
+  .landing-nav a[href="/new"] {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
 }
 
 /* ---------- pad-editor topbar at phone widths ---------- */

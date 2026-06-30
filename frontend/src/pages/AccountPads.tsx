@@ -65,7 +65,10 @@ export default function AccountPads() {
 
   // Redirect to login once the session has settled and there's no user.
   useEffect(() => {
-    if (ready && !user) navigate("/login", { replace: true });
+    if (ready && !user) {
+      const next = encodeURIComponent("/account/pads");
+      navigate(`/login?next=${next}`, { replace: true });
+    }
   }, [ready, user, navigate]);
 
   // ~150ms debounce on the search input (dashboard spec §2).
@@ -181,7 +184,8 @@ export default function AccountPads() {
     }
   }
 
-  if (!ready || (!user && !ready)) return <div className="pad-state" />;
+  if (!ready) return <div className="pad-state" />;
+  if (!user) return null;
 
   return (
     <main className="dash">

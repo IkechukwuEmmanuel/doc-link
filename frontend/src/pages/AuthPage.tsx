@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import ThemeToggle from "../components/ThemeToggle";
@@ -40,7 +40,7 @@ function validateUsername(raw: string): string | null {
 export default function AuthPage({ mode }: Props) {
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
-  const { login, signup } = useAuth();
+  const { user, login, signup } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -52,6 +52,13 @@ export default function AuthPage({ mode }: Props) {
   const isSignup = mode === "signup";
   // Live username validation (signup only) for inline feedback.
   const usernameError = isSignup && username ? validateUsername(username) : null;
+
+  useEffect(() => {
+    if (user) {
+      const next = new URLSearchParams(window.location.search).get("next") || "/account/pads";
+      navigate(next.startsWith("/") ? next : "/account/pads", { replace: true });
+    }
+  }, [navigate, user]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -76,7 +83,8 @@ export default function AuthPage({ mode }: Props) {
       } else {
         await login(email, password);
       }
-      navigate("/");
+      const next = new URLSearchParams(window.location.search).get("next") || "/";
+      navigate(next.startsWith("/") ? next : "/", { replace: true });
     } catch (err) {
       setError((err as Error).message);
     } finally {
